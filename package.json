@@ -1,0 +1,27 @@
+{
+  "name": "automation",
+  "version": "1.0.0",
+  "description": "AliExpress listing automation - reads YAML, fills form",
+  "main": "src/main.ts",
+  "scripts": {
+    "fill": "tsx src/main.ts",
+    "full": "tsx src/main.ts",
+    "smoke": "tsx src/main.ts --smoke",
+    "login": "tsx src/main.ts --login-only",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^25.2.3",
+    "js-yaml": "^4.1.1",
+    "playwright": "^1.58.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.3.6"
+  }
+}
