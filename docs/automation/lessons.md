@@ -170,6 +170,90 @@
 - working_selector_or_action: 下拉和自动补全在 fallback 之前，必须先读取当前真实候选面板。只要可见候选项存在且与预期 hints 完全不匹配，就立即判定 `真实交互漂移`，记录前 5 个候选文本，停止旧逻辑并转人工；不要再盲按键盘猜第一个选项。只有当候选面板为空时，才允许保守的键盘 fallback。
 - rollback_condition: 如果平台后续改成“无可见候选、只能键盘触发”的新控件，且连续 2 次在无候选面板场景下无法完成提交，需要单独为该控件建新适配层，不能删除这条 live gate 去恢复盲选。
 
+## 2026-03-15 / Stable Chain / Module 2 Dropdown Drift Must Not Reach Keyboard Fallback
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module2-structured-fields.test.ts`
+- relation: enriches
+- failure_signature: 旧 lesson 已经约束了“真实候选漂移时要停手”，但如果只锁 autocomplete，不锁 dropdown 变体，后续有人仍可能在 `电压/配件位置/产地` 这类下拉字段里恢复 `ArrowDown/Enter` 盲选。日志看起来像“字段已处理”，实际只是把第一个错误候选提交进去。
+- working_selector_or_action: `selectDropdownWithOptionHintsByLabel()` 在 dropdown 面板可见且所有候选都不匹配预期 hints 时，必须直接判定 `真实交互漂移`，记录候选文本，发送 `Escape` 收起面板，并把字段留给人工；禁止继续走 `ArrowDown/Enter`。回归夹具固定用 `36V/48V` 这类错误候选，显式断言键盘 fallback 计数保持 `0`。
+- rollback_condition: 如果未来平台下拉变成“先按键盘才能渲染候选”的新交互，不要删除这条 drift gate；先补能区分“候选尚未渲染”与“候选已漂移”的新探针，再决定是否恢复受限键盘触发。
+
+## 2026-03-15 / Stable Chain / Module 5 SKU Image Recovery Must Preserve Later Rows And Final Retry
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module5-sku-image-recovery.test.ts`
+- relation: enriches
+- failure_signature: 真实 run 已经证明“图库中断后能恢复”，但如果没有独立回归锁住，后续很容易退化成两种坏结果之一：要么某个 SKU 连续失败后直接中断整个模块，要么只做当前行重试却不在模块尾回补。两种情况都会让后续 SKU 白白卡住，或者把失败行悄悄丢掉，形成“流程继续了但图片并不完整”的假成功。
+- working_selector_or_action: `fillSKUImages()` 必须遵守固定恢复顺序：单行先重开重试一次；仍失败则记录 deferred item，继续后续 SKU；模块收尾阶段再对 deferred item 重试一次。为避免测试重新跑真实图库，允许像 `6b` 一样注入 `selectImageFromLibraryFn` 测试替身，但默认运行语义仍然走现有 `selectImageFromLibrary()`。
+- rollback_condition: 如果未来 SKU 图片上传被改成整批多选或完全不同的媒体控件，不要保留这条“逐行 immediate retry + final retry”假设；先补新的控件级回归，再调整恢复策略。
+
+## 2026-03-15 / Stable Chain / Module 5 Hidden SKU Tab Bootstrap Must Be Signal-Based, Not Blind Sleep
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module5-sku-image-recovery.test.ts`
+- relation: enriches
+- failure_signature: 当 SKU 区域默认折叠在 `SKU价格与库存` tab 后面时，旧逻辑既可能因为 tab 定位太脆而根本没点开，也可能在点开后无脑 `sleep 1800ms + 500ms`。前者会直接让 `fillSKUImages()` 报“未找到图片上传按钮”，后者即使最终成功也会把稳定模块拖进无意义长等待。
+- working_selector_or_action: `ensureSkuSectionVisible()` 必须先用更鲁棒的 `SKU价格与库存` 交互节点定位把 tab 点开，再改成“信号到就放行”的等待：只要 `主色系下拉 / 光线颜色 / SKU grid` 任一信号变为可见，就立即继续；不得再保留固定长睡眠。回归夹具显式断言：隐藏 panel 能被打开，上传按钮能命中，且 `waitForTimeout` 不得出现 `>=1000ms` 的固定等待。
+- rollback_condition: 如果未来平台把 SKU 区域改成完全无 tab 的单页懒加载，不要保留这条 tab bootstrap 假设；先补新的显式加载信号，再调整 `ensureSkuSectionVisible()`，禁止恢复 blind sleep。
+
+## 2026-03-15 / Stable Chain / Module 5 Batch Happy Path Must Not Depend On Long Fixed Page Sleeps
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module5-ui-flow.test.ts`
+- relation: enriches
+- failure_signature: 在测试夹具里，`SKU价格与库存`、`批量填充` modal、以及行内 grid 都是同步响应的，但 `fillSKUs()` 仍保留 `420/400/350/500ms` 这类固定 `page.waitForTimeout()`。这种等待不会提高命中率，只会把 happy path 回归时间线性拖长，掩盖真正的热点。
+- working_selector_or_action: 模块 5 的固定 page sleeps 必须只保留短稳态 waits；一旦已有信号等待覆盖，就把长等待删掉或压到 `<300ms`。本轮已把 `resetSkuTabAnchor`、主色系选择、批量填充进入/提交后的几处 blind sleep 收缩，并用回归断言 `waitForTimeout` 最大值必须 `<300ms`。这条测试过绿但总时长仍高，说明后续瓶颈已转移到 locator/polling，而不是显式 sleep。
+- rollback_condition: 如果未来真实页再次出现“点击后 DOM 信号延迟可见”的新控件，不要直接把固定 sleep 加回去；先补控件级可见信号或 committed-value probe，再决定是否增加受限短等待。
+
+## 2026-03-16 / Stable Chain / Module 5 Contenteditable Row Fill Must Not Probe Missing Focused Inputs
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module5-ui-flow.test.ts`
+- relation: enriches
+- failure_signature: 单 SKU contenteditable grid 在功能上已经写成功了 `价格/货值/库存`，但函数收尾仍会去读 `page.locator('input:focus').first().inputValue()`。当页面根本没有 focused input 时，Playwright 会在这一步吃满默认 action timeout，表现为“日志已经全绿、测试却还要再卡几十秒”；三格累计后就是分钟级空耗。
+- working_selector_or_action: 这种 fallback 不能再走 Playwright action API。改成页面内即时 probe：直接读取 `document.activeElement`，只有它真的是 `input/textarea` 时才检查 `value`；否则立即返回 `false`，再走 cell text / committed value 验证。红测固定用单 SKU + contenteditable-only grid，要求总耗时 `<15s`；修复后该场景已从约 `94s` 降到 `5s` 级。
+- rollback_condition: 如果未来真实页再次依赖“动态聚焦 input[rowindex]”作为唯一提交信号，不要恢复 `input:focus.inputValue()` 这类高成本 probe；先补一个“focused input 真存在时才读值”的轻量 guard，再决定是否增加更强验证。
+
+## 2026-03-16 / Stable Chain / Visible Locator Picking Must Not Re-Probe Every Candidate In Hot Paths
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/modules-shared-visible.test.ts`
+- relation: enriches
+- failure_signature: `pickNthVisible()` 旧实现对每个候选都跑一次 `isVisible({ timeout: 100 })`。单次看起来不重，但它被模块 5 的批量按钮、批量 modal、dropdown、grid cell 等多处热路径反复调用后，会把“已经没有 blind sleep 的 happy path”重新拖成 locator/polling 风暴。
+- working_selector_or_action: 可见元素选择优先走单次 DOM pass：用 `locator.evaluateAll()` 在页面内一次性找出第 `n` 个真正可见的节点，再回到 `locator.nth(index)`；只有 DOM pass 不可用时才回退逐项 `isVisible` 探针。这样保留原语义和 fallback，同时砍掉热路径里的 N 次 Playwright action 往返。
+- rollback_condition: 如果后续某类复杂 portal/virtualized 控件出现“DOM 看起来可见但 Playwright 仍不可交互”的反例，不要直接删掉 DOM pass；先补针对该控件的回归，再把 fallback 收窄到那类控件，而不是恢复全局 N×probe。
+
+## 2026-03-16 / Stable Chain / Empty Scroll Container Evaluate Must Not Eat The Default 30s Action Timeout
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module5-sku-image-recovery.test.ts`
+- relation: enriches
+- failure_signature: `fillSKUImages()` 的 hidden-tab 场景里，日志看起来只做了 `SKU tab -> 上传图片`，但真正的 `selectImageFromLibraryFn` 要到 `30s+` 才被调用。根因不是图库、不是随机等待，而是 `ensureSkuSectionVisible()` 在不存在的主滚动容器上直接 `locator.evaluate()`，空 locator 吃满了 Playwright 默认 action timeout。
+- working_selector_or_action: 对主滚动容器这类“可能不存在”的节点，先判定 `count/visible`，再决定是否 `evaluate/scroll`。不要把“空 locator 也没关系，反正 catch 掉”当成无成本操作；在热路径里它等于一颗隐藏的 `30s` 地雷。回归门禁不只看 `waitForTimeout`，还要看上传流本身必须在几秒内真正启动。
+- rollback_condition: 如果后续页面重新引入稳定的 `#ait-layout-content` 或其他主容器，不要恢复对空 locator 的裸 `evaluate()`；先补一个“容器存在时才滚动”的 helper，再复用到其他模块，避免把 30s timeout 复制到更多热路径。
+
+## 2026-03-16 / Stable Chain / Module 7 Immediate-Ready Shipping Must Not Pay Random Delay Tax
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module7-shipping.test.ts`
+- relation: enriches
+- failure_signature: 物流区 DOM 已经完整可见、输入框也已 ready 时，`fillShipping()` 仍会在 `scrollIntoViewIfNeeded()` 后和模块结尾各付一次 `randomDelay()`。结果不是更稳，而是把 immediate-ready 场景从应有的秒级拖成 `2.7s+`，纯属时间税。
+- working_selector_or_action: 对 `fillShipping()` 这类稳定模块，滚到目标区和字段填写完成本身已经是信号，不要再无条件加随机抖动。仅在真实需要等 UI 二次渲染的节点上保留受限等待；immediate-ready DOM 必须直接往下执行。回归门禁锁定总耗时 `<2.5s`。
+- rollback_condition: 如果未来物流模块改成点击 tab 后还会延迟注入字段，先补“字段可见/可编辑”信号等待，再考虑加局部短等待；不要恢复模块级 `randomDelay()`。
+
+## 2026-03-16 / Stable Chain / Module 7 Shipping Tab Must Wait On Field Signals, Not A Fixed 350ms
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module7-shipping.test.ts`
+- relation: enriches
+- failure_signature: 物流区挂在 tab 后面时，`openShippingTab()` 一点击就固定 `waitForTimeout(350)`。这在 hidden-tab fixture 里虽然最终能过，但属于无差别时间税；字段已经立即出现时，仍白白等满 350ms。
+- working_selector_or_action: tab 打开后先看物流字段信号是否已到位，再决定是否给一小段 fallback。具体信号只认 `重量/长/宽/高` 这些输入本体可见；不要再用模块级固定等待去赌 DOM 注入时序。回归门禁锁住 `waitForTimeout` 最大值必须 `<300ms`。
+- rollback_condition: 如果未来平台把物流 tab 切换改成多段异步渲染，先补更具体的“字段 ready”信号，而不是把 `350ms/500ms` 这类固定等待塞回 `openShippingTab()`。
+
+## 2026-03-16 / Stable Chain / Shared Bulk Input Fill Must Probe Commit Before Paying A 120ms Wait
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module7-shipping.test.ts`
+- relation: enriches
+- failure_signature: `fillBulkInputByLabel()` 在 input 已经同步回显目标值时，仍然每个字段都固定 `waitForTimeout(120)` 再去读 `inputValue/value`。对物流模块这种四字段连续填写的稳定路径，这会白白叠出 `480ms` 稳定税，而且这条 helper 还会传染到模块 2。
+- working_selector_or_action: 共享 input helper 应该先 probe 一次 committed value；只有第一次 probe 没看到目标值时，才付那 `120ms` 的短等待再复查。这样既保留了慢控件兜底，又不让 immediate-echo 的 input 每次都交时间税。
+- rollback_condition: 如果后续某个控件变成“填完立即读不到值，但 120ms 后稳定回写”的唯一变体，不要把固定等待恢复成无条件；先把该控件单独圈进特定 fallback，再保留共享 helper 的 probe-first 行为。
+
+## 2026-03-16 / Stable Chain / Module 5 Contenteditable Cell Commit Must Probe Cell Text Before Paying 180ms
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module5-ui-flow.test.ts`
+- relation: enriches
+- failure_signature: `fillSkuCellValue()` 在 contenteditable grid 已经把值同步写进 cell text 时，仍然固定 `waitForTimeout(180)` 再去查 `rowindex input / focused input`。单行三格就是额外 `540ms`，而且这些等待完全不是为了真实稳定性，只是因为 probe 顺序写反了。
+- working_selector_or_action: 对 contenteditable cell，提交后先 probe `rowindex input`、`focused input`，再直接看 cell text；只有这三路都没看到 committed value 时，才付 `180ms` fallback 等待。不要把“文本已回写”的成功状态拖到 sleep 之后才认。
+- rollback_condition: 如果未来真实页改成“cell text 先显示旧值，只有 180ms 后才稳定回写”的特殊组件，不要恢复全局固定等待；先把那类组件单独识别出来，再在局部补受限 fallback。
+
+## 2026-03-16 / Truth Layer / Stable Modules Must Return Explicit Manual Gate Results Instead Of Letting main.ts Assume auto_ok
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/runlogs/run-20260316024942-e7388b_smoke.log`
+- relation: enriches
+- failure_signature: 真实 smoke 里，`1d` 明明打印“未找到上传按钮”，`1e` 明明打印“视频确认后弹窗仍未关闭，转人工”，但 `runtime/state.json.module_outcomes` 仍把它们记成 `auto_ok`。同类风险也出现在 `1c`：轮播图一旦让人手动多选，旧逻辑依旧会沿着 `main.ts -> markModuleOutcome('auto_ok')` 把失败伪装成成功，直接污染 handoff 和后续 agent 判断。
+- working_selector_or_action: 不能再让稳定模块用 `Promise<void>` 默默 `return`。像 `1c/1d/1e` 这种“通常稳定，但允许在真实页降级到人工”的模块，必须显式返回 `ModuleExecutionResult { status, evidence, screenshotPaths }`；`main.ts` 只根据模块返回值写 `module_outcomes`，并把截图路径同时追加到 `capturedScreenshotPaths` 和 outcome evidence。这样 `runtime/state.json`、`handoff-summary.json`、`runtime/latest-handoff.json` 才会一起说真话。
+- rollback_condition: 如果后续某个模块重新被验证为“绝无人工降级分支”，不要直接删掉结果契约；先跑一轮真实页 canary 证明它确实只会 `auto_ok`，再考虑把返回值压回更窄的成功路径。
+
 ## 2026-03-07 / Runtime / Module-Scoped Test First
 - source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/runlogs/20260307_module1e_only_video.log`
 - relation: enriches
@@ -232,3 +316,220 @@
 - failure_signature: 媒体中心里视频已经成功选中，`已选择:1` 也出现，但最终蓝色 `确定` 按钮在真实页和部分夹具里既不稳定暴露为可见 DOM 按钮，也不总落在 modal 边界内；结果就是代码一直报 `video_confirm_button_missing`，用户前台却能直接看见右下角蓝色按钮。
 - working_selector_or_action: 最终确认不能只靠 `modal/body` 里的 `确定/确认/OK` locator。正确兜底是：先尝试文本按钮定位；若失败，直接对视口右下角做网格扫描点击，只要 modal 关闭就判定命中。这个步骤本质上是“页面级右下角主按钮热区点击”，不是“modal 内按钮点击”。
 - rollback_condition: 只有当平台后续把最终确认重新收回到稳定可见的标准 DOM 按钮，且真实页连续 2 次验证都能被文本 locator 命中，才允许移除视口右下角网格 fallback；在此之前不得回退到只扫 modal 边界的旧逻辑。
+
+## 2026-03-10 / Module 1e / Modal Closed Is Not Success
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module1e-video.test.ts`
+- relation: enriches
+- failure_signature: 视频弹窗在最终确认后会消失，但商品视频区仍保持空白上传占位；旧逻辑把 `modal hidden` 直接记成 `✅ 视频上传完成`，形成假阳性。
+- working_selector_or_action: 视频模块的最终成功门禁必须升级为 `modal hidden + 商品视频区已回写`。实现上先等待弹窗关闭，再轮询检查商品视频区是否出现视频预览/封面/文件名等绑定证据；如果不能证明已回写，就截图并转人工，禁止打印成功。
+- rollback_condition: 只有当平台后续明确提供稳定的绑定完成事件或可直接读取的 DOM 状态，才允许缩短这条回写验证；在此之前不得恢复为“弹窗关闭即成功”。
+
+## 2026-03-10 / Module 6c / APP Description Is An Explicit Manual Gate
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/src/main.ts`
+- relation: enriches
+- failure_signature: `6c APP 描述` 之前只存在于 YAML 和 README backlog，既不在执行计划里，也不会在运行时显式提醒，结果就是集成时看起来像“自动化已覆盖模块 6”，实际这块完全漏掉。
+- working_selector_or_action: 把 `6c` 加入执行计划与模块别名，但当前策略明确设为人工门禁：若 `app_description` 有值，执行器只负责在正确时机提示人工进入 APP 详情描述编辑器，并落截图证据；不再让它隐形缺席。
+- rollback_condition: 只有当 APP 详情描述的新页面/拖拽编辑链路被单独验证为可稳定自动化后，才允许把 `6c` 从人工门禁升级为自动模块；在验证前不得再次隐藏回 backlog。
+
+## 2026-03-10 / Module 8 / Association Flows Are Manual Gates
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/src/modules.ts`
+- relation: enriches
+- failure_signature: 模块 8 旧逻辑在“欧盟责任人 / 制造商未关联”时还会继续点 `管理` 入口，把主链拖进低 ROI、高漂移的新页面；结果是明知不稳还继续闯，和半自动策略相反。
+- working_selector_or_action: 模块 8 只保留低风险项自动化（如库存扣减）；对欧盟责任人 / 制造商，只检测“是否已关联”。未关联或未找到时，直接记录日志、截图并转人工，不再主动点击任何 `管理` 入口。
+- rollback_condition: 只有当欧盟责任人 / 制造商的完整关联流程被单独验证为可稳定自动化，且连续 2 次真实页通过，才允许恢复自动进入管理页；在此之前不得回退到“先点进去再说”的旧逻辑。
+
+## 2026-03-09 / Module 6a / Buyers Note Template Must Resolve From Repo Root First
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module6-buyers-note.test.ts`
+- relation: enriches
+- failure_signature: 买家须知模板传的是 `templates/foo.html` 这种仓库内相对路径，但模块按 `src/../../` 去解，结果会跳到仓库外层目录；表现是日志报 `模板文件不存在`，编辑器内容为空。
+- working_selector_or_action: 相对模板路径优先按自动化仓库根目录解析，其次兼容旧的上层目录布局，最后再兜底 `process.cwd()`；绝对路径保持直通。不要把 `buyers_note_template` 绑死到作者本机目录。
+- rollback_condition: 只有当模板资产被统一迁到单一外部目录并且调用方全部切到绝对路径，才允许移除多候选解析；在此之前不得回退到单一路径假设。
+
+## 2026-03-09 / Runtime / Screenshot Evidence Must Be Bound Into State Snapshots
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/src/main.ts`
+- relation: enriches
+- failure_signature: 运行前后明明已经截图，但 `runtime/state.json` 的 `evidence.screenshot_paths` 一直是空数组。结果就是“证据存在”和“状态机声明有证据”脱钩，监督层看不到真实截图链。
+- working_selector_or_action: `screenshot()` 必须返回实际产物路径，主执行流在 `before_fill / after_fill / error` 这些门禁点把路径归一化为相对仓库路径并累积写回每个 checkpoint。状态快照和日志产物必须引用同一批证据。
+- rollback_condition: 只有当 runtime 监督层改成直接读取截图目录索引、完全不再依赖 `state.json` 内联证据时，才允许移除这条回填；在此之前不得恢复为空数组占位。
+
+## 2026-03-12 / Module 3 / Customs Needs Label-scoped Fallback, Not Placeholder Roulette
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module3-customs.test.ts`
+- relation: enriches
+- failure_signature: 海关信息区并不总给 `placeholder`，有些布局只有“海关编码 / HS Code”标签和旁边的输入框。旧逻辑只赌 `input[placeholder*="海关"|"HS"]`，结果就是日志写着“未找到海关编码输入框，可能已有默认值”，实际该填的 HS code 根本没写进去。
+- working_selector_or_action: `fillCustoms()` 先试 placeholder，再回退到 label-scoped 定位：接受 `海关编码 / HS编码 / HS Code / HS code` 文本，并从 label 或同一行容器里回溯出最近的 `input/textarea`，找到后清空并写入 HS code。
+- rollback_condition: 如果平台后续把海关字段改成 Select / 复合控件，或标签文本完全脱离输入行导致上述 label-scoped XPath 连续 2 次失配，停止沿用当前输入框策略，转人工并先做 DOM 探针重建控件类型。
+
+## 2026-03-12 / Module 3 / Compliance Tab Drifted Into Qualification Flow, So Customs Must Manual-Gate
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/runlogs/20260312_module3_minimal_real_v4.log`
+- relation: enriches
+- failure_signature: 真实页点击顶部 `合规信息` 后，页面不再出现 `海关编码 / HS Code` 输入，而是进入 `海关监管属性 / 资质信息 / 关联欧盟责任人` 流。旧逻辑会把这种漂移误报成“未找到输入框，可能已有默认值”，让模块 3 看起来还能自动，实际上已经失效。
+- working_selector_or_action: 模块 3 先切到顶部 `合规信息` tab；如果仍找不到 HS 输入，再检测 `海关监管属性 / 资质信息 / 关联欧盟责任人` 这些新流特征词。一旦命中，立即截图并明确记录 `模块 3 转人工处理`，不要继续伪装成默认值路径。
+- rollback_condition: 只有当真实发布页再次出现稳定可写的 HS 输入，或找到新的海关填写入口并连续 2 次真实验证通过，才允许把模块 3 从人工门禁恢复为自动填写；在此之前不得再宣称“基本可用”。
+
+## 2026-03-14 / Runtime / Docs Must Match Operational Truth
+- source: `cross-review synthesis from model-b and model-c`
+- relation: enriches
+- failure_signature: README、runbook、lessons、runtime 状态如果不一致，就会导致后续模型和维护者基于错误前提继续执行，例如把 `人工门禁` 误当 `基本可用`，或把 `单独维护模块` 误当主链模块。
+- working_selector_or_action: 项目规划必须显式区分 `稳定 / 收口中 / 人工门禁 / 单独维护` 四种状态；`S6 Done` 不得再被解释为“全自动完成”。README、roadmap、runtime 结构至少要共享同一套模块成熟度语义。
+- rollback_condition: 只有当 runtime 已提供更细粒度的 `module_outcomes`，并且 README 能自动从运行时生成时，才允许减少手动同步；在此之前不得让文档与运行时分叉。
+
+## 2026-03-14 / Module 4 / SKU Tab Anchor Must Not Assume Site-specific Scroll Containers
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module4-pricing.test.ts`
+- relation: enriches
+- failure_signature: 模块 4 单测会直接挂在 `fillPricingSettings()` 里，看起来像“价格逻辑卡死”，实际根因是 `resetSkuTabAnchor()` 默认假设页面一定有 `#ait-layout-content / #ait-microapp-content / .layout-content-container` 这类站点滚动容器。测试夹具没有这个容器时，代码会在 `scroller.evaluate(...)` 上悬空等待，导致后续 `SKU价格与库存` tab 根本没打开。
+- working_selector_or_action: SKU tab 锚点和零售价 header 定位都必须先解析“主滚动容器是否存在”；若不存在，立即降级到 `window.scrollTo/window.scrollBy`，不要把站点专用容器假设写死成通用逻辑。同时，文本 tab/header 定位不要再用 `text=A, text=B` 这种不稳写法，改成 `locator('text=A').or(locator('text=B'))`。
+- rollback_condition: 只有当滚动容器解析被统一封装成站点级 adapter，且所有测试夹具与真实页都共享同一解析层时，才允许移除当前的 window-level fallback；在此之前不得恢复对站点专用 scroll container 的强依赖。
+
+## 2026-03-14 / Module 4 / Dropdown Helpers Must Recognize Bare role=option Overlays
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module4-pricing.test.ts`
+- relation: enriches
+- failure_signature: 下拉框明明已经弹出，测试页也能看到 `role=\"option\"` 的选项，但 helper 一直报告“未找到计量单元选择器/销售方式选择器”。根因不是字段定位失败，而是选项选择器只认识 `.next-overlay-wrapper / .ait-select-dropdown / .next-menu` 这类站点样式容器，完全忽略了裸 `div[role=\"option\"]` overlay。
+- working_selector_or_action: 所有 dropdown helper 的可见选项集合必须把 `[role=\"option\"]:visible` 和 `[role=\"listbox\"] [role=\"option\"]` 作为通用兜底，站点 class selector 只作为优化层，而不是唯一真相。这样测试夹具和真实页都能共享一套更通用的控件类型识别。
+- rollback_condition: 只有当项目正式引入控件级 adapter，并把不同 UI 壳页的 dropdown option 容器统一映射到同一抽象层后，才允许收紧这些通用 `role=option` fallback；在此之前不得回退到只认站点样式类名。
+
+## 2026-03-14 / Module 5 / Batch Fill Plan Must Only Carry Shared Fields
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module5-batch-plan.test.ts`
+- relation: confirms
+- failure_signature: 多 SKU 批量路径最容易在后续修补中重新混入逐行商业字段（零售价、货值），形成“自动化成功但价格写错”的高风险假阳性。
+- working_selector_or_action: `deriveMultiSkuBatchPlan()` 的测试面必须锁死四条语义边界：库存只在全部 SKU 一致时输出；重量和尺寸只在正值且完整时输出；任一尺寸缺失就整组不批量；价格和货值永远不能进入 batch plan。
+- rollback_condition: 若未来有人想让批量填充承载价格/货值，必须先证明平台 UI 和业务规则允许共享商业字段，并新增独立测试；在此之前禁止修改这条保护。
+
+## 2026-03-14 / Runtime / module_outcomes Is The Truth Layer For Semi-Auto Runs
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/runtime/state.json`
+- relation: confirms
+- failure_signature: 只看全局 `S6 Done` 会把“自动完成”“人工门禁后继续”“仅检测未填写”混成同一结果，监督层和复盘都会失真。
+- working_selector_or_action: `runtime/state.json` 必须持久化 `module_outcomes`，每个模块至少记录 `id/name/status/evidence`。真实浏览器运行后要验证它确实落盘，而不是只在单元测试里存在。本轮最小真实链路已验证 `6c/8` 会正确落成 `manual_gate`。
+- rollback_condition: 若未来改状态机或执行计划，必须保留 `module_outcomes` 这一层；不能再次退回“全局完成态代表一切”的简化做法。
+
+## 2026-03-14 / Refactor / First-Cut shared + video Split Must Be Protected By Structural Tests
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/modules-shared-split.test.ts`
+- relation: enriches
+- failure_signature: `modules.ts` 和 `modules/video.ts` 同时保留同名 helper 时，后续修复会只落到其中一处，形成“video 流修了、主模块旧 helper 还在跑”的双真相状态。表面测试可能还绿，但真实行为会开始漂移。
+- working_selector_or_action: 第一刀拆分只抽 `shared` 和 `video`，并用结构测试锁住“共享 helper 只能从 `src/modules/shared.ts` 导入、不能继续在 `modules.ts` 本地定义”。拆分后至少回归 `modules-shared-split`、`module1e-video-module-split` 和一组目标模块定向测试。
+- rollback_condition: 如果共享 helper 抽取后导致 `module1e-video`、`module4-pricing`、`module5-batch-plan` 或 `runtime-supervision` 回归失败，不要继续扩大拆分范围；先把失败 helper 退回单点抽取模式，再逐个家族迁移。
+
+## 2026-03-14 / Module 5 / Row Fill Must Treat Empty contenteditable As A Real Editor
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module5-ui-flow.test.ts`
+- relation: enriches
+- failure_signature: 模块 5 在更接近真实 UI 的 grid fixture 中，批量共享字段能成功，但逐行价格/货值一直报 `未找到第 N 行价格输入框 / 货值输入框`。真实根因不是 cell 定位失败，而是空的 `contenteditable` 编辑节点不满足旧版 `input:visible` 路径，导致行内编辑分支根本没启动。
+- working_selector_or_action: SKU grid 的逐行填写必须先判断“cell 内是否存在编辑节点”，再判断它是不是传统可见 input。只要存在 `[contenteditable="true"], input, textarea`，就允许进入编辑分支；对 `contenteditable` 优先用 DOM 写值并触发 `input/change/blur`，再回退键盘输入。验证仍以 committed value / cell text 为准。
+- rollback_condition: 如果未来真实页要求只能通过键盘事件提交，不要删除这条 DOM-write fallback；改为在写值后补更硬的提交动作与最终校验。禁止退回“只认可见 input”的旧逻辑。
+
+## 2026-03-14 / Module 4 / Small Real-Page Verification Is Enough To Promote Status
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/runlogs/20260314_module4_minimal_real.log`
+- relation: confirms
+- failure_signature: 模块 4 之前一直停在“收口中”，原因不是持续失败，而是缺少一轮最小真实页验证，导致 README 和 roadmap 只能保守描述，后续决策会继续把它当成未完成模块。
+- working_selector_or_action: 对“表单级 but 非高风险”的模块，不必等整条主链回归后再升级状态；跑一轮最小 bootstrap 即可。本轮用 `--modules=1a,4` 验证 `最近使用 -> 尾灯总成` 后，`fillPricingSettings()` 在真实页稳定完成了 `最小计量单元 + 销售方式`，足以把模块 4 从“收口中”升级为“稳定”。
+- rollback_condition: 如果后续真实页再次出现“销售方式未命中/下拉漂移/最小计量单元回退默认值”，立即把模块 4 降回“收口中”，不要继续沿用当前稳定声明。
+
+## 2026-03-14 / Runtime / Manual Handoff Summary Must Resolve Tokens To Real Evidence
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/artifacts/manual-handoffs/run-20260314100758-37ba83/handoff-summary.json`
+- relation: enriches
+- failure_signature: 只从 `module_outcomes` 直接生成 handoff 时，`items` 虽然能列出 `manual_gate` 模块，但 `evidence` 会变成空数组。根因不是 handoff schema 错，而是 `module_outcomes.evidence` 当前很多是 token（如 `app_description_manual_gate`），而真实截图路径只存在于 `state.evidence.screenshot_paths`；如果模块内截图不回传到 runtime 证据层，摘要就会变成没有图的空壳。
+- working_selector_or_action: 人工交接摘要必须建立在两层解析上：先把 manual gate 截图路径从模块函数回传给 `main.ts` 并追加到 `capturedScreenshotPaths`，再由 `buildManualHandoffSummary()` 用 token 去解析真实 screenshot path。最终产物固定落在 `artifacts/manual-handoffs/<run_id>/handoff-summary.json/.md`，`runtime/latest-handoff.json` 只保留最新指针。
+- rollback_condition: 如果未来 `module_outcomes.evidence` 直接升级为完整路径，允许简化 token 解析逻辑；但在那之前，禁止再生成“有人工模块但 evidence 为空”的 handoff 摘要。
+
+## 2026-03-15 / Runtime / Preflight Must Validate Only Browser-External Facts
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/runlogs/20260315_preflight_block_video_empty.log`
+- relation: enriches
+- failure_signature: 旧版 `S0 Preflight` 只证明 YAML 能读、schema 能过，不能证明“本轮选中的模块值不值得开浏览器”。结果是用户经常在前台监督了半天，最后才发现选中的模块根本没有最小数据，比如 `--modules=1e` 但 `video_file` 为空。更糟的是，如果 preflight 去碰图库路径这类平台内语义路径，又会和真实运行逻辑打架，形成“预检说失败、页面其实能选”的双真相。
+- working_selector_or_action: `validatePreflight()` 只能检查两类东西：`selected modules` 的最小 payload 是否存在，以及浏览器外的本地文件是否真实存在。适合做硬 fail 的包括 `1a/title/1c/1d/1e(local)/4/5/6a/6b/7`；`3/6c/8` 这类本来就允许 default/manual gate 的模块只给 warning，不阻断。图库语义路径（`carousel/white_bg_image/marketing_image/detail_images`）只检查“是否非空”，绝不按本地文件路径判死。
+- rollback_condition: 如果未来 preflight 开始引入 DOM、选择器、平台壳页判断，立即回退；那已经越过了“浏览器外硬约束”的边界，会和模块内部运行时校验发生重复甚至冲突。
+
+## 2026-03-15 / Runtime / latest-handoff Must Be Cleared At New Listing Run Start
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/runtime/latest-handoff.json`
+- relation: enriches
+- failure_signature: 新 run 已经在 `S0 Preflight` 被 `blocked`，但 `runtime/latest-handoff.json` 仍指向上一轮 `2026-03-14` 的人工交接摘要。这样人工接手和后续 agent 都可能误以为“当前 run 还有这些手工项要补”，实际看到的是旧尸体，不是当前现场。
+- working_selector_or_action: 人工交接 latest pointer 不能只在 `S5 Verify` 附近维护。新的 listing run 一开始就先清掉旧 `runtime/latest-handoff.json`；只有当当前 run 真正走到 `S5` 且 `module_outcomes` 里存在 `manual_gate/detect_only` 时，才重新生成 handoff artifact 并写回 latest pointer。若当前 run 没有人工交接项，则 latest pointer 保持不存在。
+- rollback_condition: 如果未来 handoff 契约升级为“latest 文件本身就能表达当前 run 的 blocked/failed/no-handoff 状态”，可以把“删除文件”收敛成更显式的状态对象；在那之前，禁止保留跨 run 的旧 latest pointer。
+
+## 2026-03-15 / Runtime / Preflight Needs A Real Main-Flow Test, Not Just Function Tests
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/main-preflight-blocked.integration.test.ts`
+- relation: enriches
+- failure_signature: 只测 `validatePreflight()` 函数本身，会让人误以为“preflight 已经可靠”，但主流程仍可能在别处说谎，比如写错 runtime 根目录、残留旧 `latest-handoff`、甚至已经开了浏览器才失败。函数绿，不代表 `main.ts` 的行为绿。
+- working_selector_or_action: preflight 必须至少有一条真实子进程集成测试，直接跑 `src/main.ts` 并断言四件事同时成立：当前 run 的 `runtime/state.json` 写成 `S0 blocked`、浏览器启动 marker 不存在、旧 `latest-handoff` 被清掉、CLI 退出码非零。为此只允许加入最小测试注入点，例如 `AUTOMATION_PROJECT_ROOT` 和 browser launch marker；不要把测试逻辑渗进业务分支。
+- rollback_condition: 如果未来 `main.ts` 被拆成可直接注入依赖的 orchestration 层，可以把子进程测试缩成更快的进程内集成测试；但在完成这种重构前，禁止退回“只测 preflight 函数”的假覆盖。
+
+## 2026-03-15 / Runtime / Truth Layer Must Be Checked Across Files, Not Inside One Object
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/runtime-truth-consistency.test.ts`
+- relation: enriches
+- failure_signature: 单看 `module_outcomes`、单看 handoff helper、或单看 `latest-handoff.json` 都可能各自正确，但组合起来未必一致。最典型的假象是：`module_outcomes` 标了 `manual_gate`，latest pointer 也存在，但 handoff JSON 里缺条目，或者反过来 latest pointer 还指向旧 run。
+- working_selector_or_action: 真相层测试必须跨文件校验：从当前 snapshot 生成 handoff 后，直接读取 `runtime/latest-handoff.json` 指向的 artifact，再比对 `module_outcomes` 中的 `manual_gate/detect_only` 集合。规则只有三条：有人工项就必须在 handoff 中逐项出现；`auto_ok` 不得混入 handoff；没有人工项时 latest pointer 必须不存在。
+- rollback_condition: 如果未来 handoff 事实源被重新建模成单一数据库表或统一 runtime ledger，可以把跨文件断言迁移到新事实源；在此之前，不能再偷懒只测单个 helper 返回值。
+
+## 2026-03-15 / Stable Chain / Module 5 Shared Weight-Dim Inputs Must Stay Inside SKU Scope
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module5-shipping-boundary.test.ts`
+- relation: enriches
+- failure_signature: 模块 5 后半段填写共享 `重量/长/宽/高` 时，如果继续用全页 `page.locator(...).first()`，一旦 DOM 顺序变化或模块 7 物流区更早出现在页面上，就会把 SKU 共享字段写进物流总字段，随后模块 7 再写一次自己的总重量总尺寸，形成“日志全绿但两边语义串位”的假成功。
+- working_selector_or_action: `fillSKUs()` 的共享重量和尺寸必须先定位 SKU 区域 scope，再只在这个 scope 内找 `重量/长/宽/高` 输入。可以接受 `#sku-panel` 这类显式容器，也可以从 `posting-feild-color-item / sell-sku-cell / 批量填充` 这些 SKU 标记向上回溯出最近祖先，但找到 SKU scope 后不得再回退全页 `first()`。
+- rollback_condition: 如果未来 AliExpress 把 SKU 共享重量尺寸完全拆出 SKU 区域并挂到独立 step，需要先新增新的模块边界测试再调整 scope；在那之前不得恢复全页无 scope 的输入定位。
+
+## 2026-03-15 / Stable Chain / Module 6b Detail Upload Fallback Must Reject Broad Ancestor Wrappers
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module6-detail-images.test.ts`
+- relation: enriches
+- failure_signature: 当详情编辑器锚点暂时不存在、逻辑退回“带 `详情描述|详情图|商品详情|描述` 文本的容器内找 `上传图片`”时，外层 page wrapper 也会匹配这段文本。若直接在第一个匹配容器里拿 `.first()`，就会先点到模块 1/5 的上传入口，日志仍可能显示“详情图完成”，实际却把图片送进错误模块。
+- working_selector_or_action: 模块 6b 的 fallback scope 必须先排除“内部还套着更细 detail 容器”的 broad ancestor wrapper，只在最内层 detail-like container 内取上传按钮。红测固定用“page wrapper + module1 upload + detail section upload”的混合 DOM 验证，确保最终命中的是详情区 `upload`，不是前序模块入口。
+- rollback_condition: 如果未来真实页把详情文案和上传入口拆成兄弟节点、导致“最内层 detail container”不再持有上传按钮，不要删除这条 broad-wrapper 过滤；应先补新 fixture，明确新的 sibling scope 规则后再调整。
+
+## 2026-03-16 / Runtime Observability / Module 5 Needs Start Markers For Real Sub-Phase Attribution
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/artifacts/browser-video/run-20260316034018-f331fe_smoke/events.json`
+- relation: enriches
+- failure_signature: 只在 `module5_running` 开始和 `fill_sku_images` 完成时写事件，会把真实耗时吞进错误阶段。典型假象是 `fill_sku_shared_fields` 看起来耗时 56s，实际上那 56s 大部分是 SKU 图片流程；另一个真实页分支是“传统 grid 不可见 -> 直接走批量填充”，如果不在这条分支补 marker，`events.json` 会直接跳过 batch 阶段。
+- working_selector_or_action: `module5` 的 observability 必须按“阶段开始”落 marker，而不是等阶段完成后再补记。当前最小有效切分是：`fill_sku_variants`、`fill_sku_batch_fields`、`fill_sku_row_values`、`fill_sku_shared_fields`、`fill_sku_images_running`。其中 `fill_sku_batch_fields` 必须覆盖 direct-batch fallback，`fill_sku_images_running` 必须在第一张图上传前写入，这样下一条事件才能准确给出该阶段时长。
+- rollback_condition: 如果未来改成更细粒度的 timing span 或统一 tracer，可以替换这些阶段 marker；但在新的 tracer 能证明 direct-batch 和 SKU 图片开始时点都被覆盖前，禁止删回“只有 module start / module done”的粗粒度事件。
+
+## 2026-03-16 / Image Library / selectImageFromLibrary Must Wait For Signals Before Paying Delay Tax
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/artifacts/browser-video/run-20260316041745-ab303d_smoke/events.json`
+- relation: enriches
+- failure_signature: 图库 helper 在 modal、tab、目录树、确认按钮都已经 ready 的场景里，仍然无条件支付 `500-1000ms`、`800-1500ms`、`300-700ms` 这类 blind delay。结果是单张 SKU 图即使 DOM 已 ready，也要重复吃“打开弹窗 -> 切 tab -> 点目录 -> 确认”的固定时间税，真实 smoke 里这条链会直接膨胀成 `fill_sku_images_running` 的主热点。
+- working_selector_or_action: `selectImageFromLibrary()` 必须先等真实信号，再决定是否 fallback delay。当前有效规则是：点击上传后直接等 modal 可见；切到“选择图片”后直接等 folder/image/search signal；目录点击和展开优先等 spinner hidden，不再无条件 sleep；搜索后直接等 loading hidden；选图和确认后直接等 button / modal 的状态变化。只有信号没来时才付短 fallback delay。
+- rollback_condition: 如果未来平台新增反爬节流，导致完全去掉 blind delay 后真实页开始丢点击或 modal 抖动，不要恢复旧的整段固定等待；应先加最小信号检测或仅对失败路径补短 fallback，再重新验证 smoke。
+
+## 2026-03-16 / Image Library / Fixture-Only Folder Shortcuts Must Lose To Real-Page Evidence
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/artifacts/browser-video/run-20260316063507-5f5063_smoke/events.json`
+- relation: replaces
+- failure_signature: 在夹具里，如果产品目录节点和目标图片都提前可见，“直接点最深 product folder” 看起来能省掉 `商品发布 -> TailLights -> 分类 -> 产品` 的整段 traversal。但真实页 smoke 证明这条 shortcut 会把目录状态带偏：首个 SKU 先在错误层级找图失败，随后触发整轮 modal/tree retry，`fill_sku_image_tree_running` 单次就膨胀到 `26436ms`，比回滚前安全路径更慢。
+- working_selector_or_action: `selectImageFromLibrary()` 可以保留“当前视图里目标图已可见 -> 直接选图/确认”的短路，但一旦目标图尚未可见，就必须回到 canonical tree path，按 `商品发布 -> TailLights/TailLight -> 分类 -> 产品` 顺序重放目录导航，不要假设“最深可见 product folder” 就等于当前真实上下文。对子阶段 observability 也要保留，这样 smoke 才能直接指出 modal/tree/select/confirm 到底哪段回归了。
+- rollback_condition: 如果未来真实页再次证明某种目录 shortcut 稳定有效，不要直接恢复这条被证伪的 deepest-first 逻辑；先补新的真实页证据和回归夹具，确认它不会触发 missing-folder / retry 链，再决定是否替换 canonical tree path。
+
+## 2026-03-16 / Image Library / Tree-Level Markers Must Exist Before You Optimize Folder Traversal
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/artifacts/browser-video/run-20260316072836-d005ff_smoke/events.json`
+- relation: enriches
+- failure_signature: 只有总的 `fill_sku_image_tree_running` 时，真实页里 30s+ 的目录导航只会表现成一个大黑箱。你知道“tree 慢”，但不知道是 `商品发布`、`TailLights`、分类层还是产品层在付税，于是下一刀很容易又落到广义 shortcut 或错误层级缓存上，重演 fixture 绿、真实页炸的回归。
+- working_selector_or_action: `selectImageFromLibrary()` 在 canonical tree path 里必须在每一级点击前落 marker。当前最小有效切分是 `fill_sku_image_tree_level_1_running` 到 `fill_sku_image_tree_level_4_running`，分别对应 `商品发布 -> TailLights/TailLight -> 分类 -> 产品`。真实 smoke 已证明这组 marker 能直接暴露热点集中在前 3 层，而不是最后的 product 层。
+- rollback_condition: 如果未来 runtime tracer 改成 span 模型，可以把这些 level marker 映射到更通用的 tree spans；但在新 tracer 能继续区分四层目录前，不能删回只有一个 `fill_sku_image_tree_running` 的粗粒度事件。
+
+## 2026-03-16 / Image Library / Folder Visibility Polling Must Not Pay UI-Sized Random Delay Tax
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/image-library-navigation.test.ts`
+- relation: enriches
+- failure_signature: `waitFolderVisible()` 明明只是“等下一层目录露出来”的 probe，却继续沿用 UI 交互级的 `randomDelay(300, 700)`。在“上一层点击后 50ms 左右就出现下一层”的场景里，这会把简单的 visibility polling 硬拖成秒级；真实页分层 marker 也能看到 level 1/2/4 累积耗时被这类探测税放大。
+- working_selector_or_action: 目录可见性 probing 必须降成短探针，并复用可注入的 `delayFn`。当前有效做法是 `waitFolderVisible()` 每轮先等 spinner hidden，再用 `delay(80, 160)` 做短轮询；测试环境可用 no-op delay 直接锁住“短延迟 reveal 不得再付长 polling 税”，真实 smoke 也验证 tree 四层总时长从 `31968ms` 降到 `30544ms`，其中 level 2 单独下降约 `10.8%`。
+- rollback_condition: 如果未来平台开始对目录树探针限流，导致短轮询引发真实页 miss，不要直接恢复 `300-700ms` 的 UI 级随机等待；先保留 level marker，再按真实 smoke 证据微调 probe interval。
+
+## 2026-03-16 / Image Library / Ancestor Reuse Only Counts When Real Smoke Actually Hits It
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/runlogs/run-20260316081202-856ef0_smoke.log`
+- relation: enriches
+- failure_signature: 夹具能证明“下一层 canonical folder 已经可见时，当前层点击可以安全复用”，但真实 smoke 如果连续 0 次出现 `目录层已复用`，就说明当前页面每次重开图库仍基本从根状态开始。此时继续围绕 ancestor reuse 做 micro-hardening，只是在雕一条当前根本没被命中的分支。
+- working_selector_or_action: ancestor reuse 必须保持极窄语义：只在 `下一层已可见` 且 `更深层还未全部可见` 时才允许跳过当前层，绝不退化成 broad shortcut。更重要的是，要把它当成“可选命中路径”而不是既成收益；真实 smoke 没 hit 时，下一步应停止在这条分支上继续优化，转去别的热点或进入收口验证。
+- rollback_condition: 如果未来真实页开始保留更深的树展开状态，smoke log 连续出现 `目录层已复用` 命中，再回来评估它的真实收益；在那之前不要把这条分支当成已验证优化继续堆逻辑。
+
+## 2026-03-16 / Browser / Screenshot Capture Must Fall Back When Font Loading Blocks Playwright
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/browser-screenshot.test.ts`
+- relation: enriches
+- failure_signature: 收口 smoke 在 `before_fill` 截图时，Playwright 可能卡在 `waiting for fonts to load` 并在 30s 后超时。页面本身没挂，但整条半自动主线会因为拿不到截图证据而被误判为失败。
+- working_selector_or_action: `screenshot()` 遇到 Chromium `page.screenshot` 的 font-loading timeout 时，必须回退到 CDP `Page.captureScreenshot`，并保留原截图命名和证据路径。这样 runtime/handoff 证据链不会因为字体等待被截断。
+- rollback_condition: 如果未来某类截图明确依赖 Playwright 独有语义，不要删掉这条 fallback；先证明 CDP capture 无法覆盖该场景，再为那一类截图单独分流。
+
+## 2026-03-16 / Module 6b / Detail Images Must Return ModuleExecutionResult Instead Of Only Logging Follow-Up
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module6-detail-images.test.ts`
+- relation: enriches
+- failure_signature: 详情图部分失败时，日志会提示“人工补充详情图”，但旧实现只返回 `void`，主流程仍会把 `6b` 硬记成 `auto_ok`。结果是 runtime 和 handoff 同时说谎，人工接手看不到真实未完成项。
+- working_selector_or_action: `fillDetailImages()` 必须显式返回 `ModuleExecutionResult`。无详情图 -> `detail_images_skipped_empty`；有 unresolved/partial failure -> `manual_gate + detail_images_manual_gate screenshot`；全部成功 -> `detail_images_done`。`main.ts` 只能 `recordModuleExecutionResult('6b', result)`，禁止再硬编码 `auto_ok`。
+- rollback_condition: 如果未来详情图模块继续拆子阶段，也必须保留这个 result contract；不能退回“模块内部只打日志、主流程自己猜状态”。
+
+## 2026-03-16 / Runtime / Module Maturity Labels Must Not Override Per-Run Outcomes
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/runtime/state.json`
+- relation: enriches
+- failure_signature: 文档把 `1c/1d` 归入“稳定”后，最容易发生的误读是“closeout 主线里它们也必然 auto_ok”。真实半自动 run `run-20260316093829-2dc580` 证明并非如此：当前页面现场里，`1c/1d` 仍可能按条件落成 `manual_gate`。如果继续把成熟度标签当作本轮结果，后续 agent 和人工接手会再次被文档带偏。
+- working_selector_or_action: README / roadmap 里的“稳定 / 人工门禁 / 单独维护”只表达默认策略与成熟度；单次运行真相必须只看 `runtime/state.json.module_outcomes`，人工接手只看 `runtime/latest-handoff.json`。收口验证时必须同时核对 runtime 和 handoff，不能只看 README 表格。
+- rollback_condition: 如果未来要展示更细的成熟度，不要再让一个标签兼任“模块成熟度”和“本轮执行结果”；应新增独立字段，而不是覆盖 per-run truth。

@@ -73,6 +73,24 @@ It exists to make supervision deterministic and machine-readable.
     "field_label": "配件位置",
     "expected_value": "右+左(Right & left)"
   },
+  "module_outcomes": [
+    {
+      "id": "1a",
+      "name": "类目",
+      "status": "auto_ok",
+      "evidence": [
+        "最近使用 -> 头灯总成"
+      ]
+    },
+    {
+      "id": "6c",
+      "name": "APP 描述",
+      "status": "manual_gate",
+      "evidence": [
+        "screenshots/app_description_manual_gate_1773114534035.png"
+      ]
+    }
+  ],
   "gates": [
     {
       "name": "committed_value_present",
@@ -117,6 +135,7 @@ It exists to make supervision deterministic and machine-readable.
 | `module.step` | Fine-grained step inside the module |
 | `target.field_label` | Current field or action target |
 | `target.control_type` | `dropdown`, `autocomplete`, `modal`, `button`, `batch-panel`, etc. |
+| `module_outcomes` | Per-module terminal truth for the current run: `auto_ok`, `manual_gate`, `detect_only`, `failed`, `skipped`, or `pending` |
 | `gates` | Evidence-based pass/fail checkpoints |
 | `anomalies` | Observed deviations that may or may not require intervention |
 | `evidence` | Paths that Gemini CLI can inspect |

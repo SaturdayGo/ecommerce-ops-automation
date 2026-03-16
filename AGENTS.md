@@ -14,10 +14,23 @@ It must not click, type, navigate, close the browser, or edit source code while 
 
 Read these files first:
 
+- `docs/agent-index.md`
 - `.gemini/GEMINI.md`
 - `docs/supervisor/gemini-supervisor-agent-template.md`
 - `docs/supervisor/state-intervention-schema.md`
 - `docs/automation/lessons.md`
+
+## Canonical Global Context
+
+If the task asks for cross-tool global context, use only these canonical files:
+
+- `/Users/aiden/.codex/AGENTS.md`
+- `/Users/aiden/Documents/Antigravity/soul.md`
+- `/Users/aiden/Documents/Antigravity/memory.md`
+- `/Users/aiden/Documents/Antigravity/reference.md`
+
+Do not fall back to deprecated paths under `/Users/aiden/Documents/Codex` or `/Users/aiden/Downloads`.
+Do not silently switch to shadow copies under `/Users/aiden/.claude/` unless the user explicitly asks for them.
 
 ## Runtime Contract
 
