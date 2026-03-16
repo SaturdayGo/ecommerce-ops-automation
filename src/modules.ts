@@ -1562,11 +1562,18 @@ async function ensureRetailPriceHeaderVisible(page: Page): Promise<boolean> {
         .locator('text=零售价(CNY)')
         .or(page.locator('text=零售价'))
         .first();
+    const retailRowCell = page
+        .locator('td.sell-sku-cell.col-skuPrice, td.sell-sku-cell.col-cargoPrice, td.sell-sku-cell.col-skuStock')
+        .first();
     const scroller = await resolveMainScrollContainer(page);
     const batchBtn = page.locator(
         'button:has-text("批量填充"), .sell-sku-common-confirm-btn:has-text("批量填充"), [role="button"]:has-text("批量填充")'
     ).first();
     for (let i = 0; i < 10; i++) {
+        if (await retailRowCell.isVisible({ timeout: 220 }).catch(() => false)) {
+            await retailRowCell.scrollIntoViewIfNeeded().catch(() => { });
+            return true;
+        }
         if (await retailHeader.isVisible({ timeout: 300 }).catch(() => false)) {
             await retailHeader.scrollIntoViewIfNeeded().catch(() => { });
             await page.waitForTimeout(120);
@@ -1587,6 +1594,9 @@ async function ensureRetailPriceHeaderVisible(page: Page): Promise<boolean> {
         }
         await scrollMainContent(page, 420, { allowWheelFallback: false });
         await page.waitForTimeout(220);
+    }
+    if (await retailRowCell.isVisible({ timeout: 220 }).catch(() => false)) {
+        return true;
     }
     return await retailHeader.isVisible({ timeout: 500 }).catch(() => false);
 }
