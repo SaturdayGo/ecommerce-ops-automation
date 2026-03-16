@@ -5,6 +5,16 @@
 .chrome-profile/
 .tmp/
 runtime/
+**/storage-state.json
+**/session*.json
+**/cookies*.json
+**/*token*.json
+**/*secret*.json
+
+# Environment files
+.env
+.env.*
+!.env.example
 
 # Dependencies and build output
 node_modules/
@@ -15,6 +25,8 @@ artifacts/
 runlogs/
 screenshots/
 tmp-dom-inspect.ts
+*.har
+*.webm
 
 # OS/editor noise
 *.log
