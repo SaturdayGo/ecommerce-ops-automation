@@ -79,11 +79,13 @@ function makeProductData(templatePath: string): ProductData {
 
 let browser: Browser;
 let page: Page;
-const templateAbsolutePath = '/Users/aiden/Documents/Antigravity/ecommerce-ops/templates/test-buyers-note.html';
+const repoRoot = path.resolve(__dirname, '..');
+const templateAbsolutePath = path.join(repoRoot, 'templates', 'test-buyers-note.html');
 const templateRelativePath = 'templates/test-buyers-note.html';
 
 test.before(async () => {
   browser = await chromium.launch({ headless: true });
+  fs.mkdirSync(path.dirname(templateAbsolutePath), { recursive: true });
   fs.writeFileSync(templateAbsolutePath, '<p><strong>Buyer note template</strong></p>', 'utf8');
 });
 

@@ -24,6 +24,7 @@ import {
     launchBrowser,
     navigateToPublishPage,
     navigateToLoginPage,
+    ensureAutomationPageVisible,
     waitForSellerLogin,
     saveAuth,
     screenshot,
@@ -45,17 +46,21 @@ import {
     fillSKUImages,
     fillBuyersNote,
     fillDetailImages,
+    fillAppDescriptionManualGate,
     fillShipping,
     fillOtherSettings,
 } from './modules';
+import type { Module5ProgressEvent } from './modules';
+import type { ModuleExecutionResult } from './modules/shared';
 import {
     createRunId,
     getRuntimePaths,
     readFreshIntervention,
     shouldPauseForSupervisor,
+    upsertModuleOutcome,
     writeRuntimeState,
 } from './runtime-supervision';
-import type { RuntimeStateSnapshot } from './runtime-supervision';
+import type { ModuleOutcome, ModuleOutcomeStatus, RuntimeStateSnapshot } from './runtime-supervision';
 import { createRunlogMirror } from './runlog';
 import {
     canonicalizeRecordedVideo,
@@ -69,18 +74,49 @@ import {
     recordRuntimeEvent,
     renderRuntimeHud,
 } from './runtime-observability';
+import { appendProjectArtifactPath } from './runtime-evidence';
 import {
     buildExecutionPlan,
     parseRequestedModules,
     requiresVideoCategoryBootstrap,
     shouldRunModule,
 } from './execution-plan';
+import type { ModuleId } from './execution-plan';
+import { validatePreflight } from './preflight';
+import {
+    syncLatestManualHandoff,
+} from './manual-handoff-summary';
+
+const MODULE_LABELS: Record<ModuleId, string> = {
+    '1a': '类目',
+    '1b': '标题',
+    '1c': '商品图',
+    '1d': '营销图',
+    '1e': '商品视频',
+    '2': '商品属性',
+    '3': '海关信息',
+    '4': '价格与基础售卖',
+    '5': 'SKU 与销售属性',
+    '6a': '买家须知',
+    '6b': '详情图',
+    '6c': 'APP 描述',
+    '7': '包装与物流',
+    '8': '其它设置',
+};
 
 function printUsage(): void {
     console.error('❌ 用法:');
     console.error('   npx tsx src/main.ts <yaml文件路径> [--smoke] [--module=1e] [--keep-open] [--auto-close]');
     console.error('   npx tsx src/main.ts --login-only [--keep-open]');
     console.error('   例: npx tsx src/main.ts ../products/f150-tail-light.yaml --modules=1e --auto-close');
+}
+
+function resolveProjectRoot(): string {
+    const override = process.env.AUTOMATION_PROJECT_ROOT?.trim();
+    if (override) {
+        return path.resolve(override);
+    }
+    return path.resolve(__dirname, '..');
 }
 
 async function main() {
@@ -107,7 +143,7 @@ async function main() {
         console.log('⚠️  --login-only 模式忽略 --module/--modules');
     }
 
-    const projectRoot = path.resolve(__dirname, '..');
+    const projectRoot = resolveProjectRoot();
     const runId = createRunId();
     const runtimePaths = getRuntimePaths(projectRoot);
     const modeLabel = executionPlan.modeLabel;
@@ -117,8 +153,48 @@ async function main() {
     const runtimeObservabilityConfig = getRuntimeObservabilityConfig(browserVideoConfig.artifactRoot);
     let lastCheckpoint: RuntimeStateSnapshot | null = null;
     let currentPage: Page | null = null;
+    let capturedScreenshotPaths: string[] = [];
+    let moduleOutcomes: ModuleOutcome[] = executionPlan.moduleIds.map((id) => ({
+        id,
+        name: MODULE_LABELS[id],
+        status: 'pending',
+        evidence: [],
+    }));
+    let activeModuleId: ModuleId | null = null;
 
-    const checkpoint = async (snapshot: Omit<RuntimeStateSnapshot, 'version' | 'run_id' | 'updated_at' | 'project_root' | 'mode'>) => {
+    if (!loginOnly) {
+        syncLatestManualHandoff(null, projectRoot);
+    }
+
+    const snapshotModuleOutcomes = (): ModuleOutcome[] => moduleOutcomes.map((outcome) => ({
+        ...outcome,
+        evidence: [...outcome.evidence],
+    }));
+
+    const markModuleOutcome = (id: ModuleId, status: ModuleOutcomeStatus, evidence: string | string[]) => {
+        moduleOutcomes = upsertModuleOutcome(moduleOutcomes, {
+            id,
+            name: MODULE_LABELS[id],
+            status,
+            evidence: Array.isArray(evidence) ? evidence : [evidence],
+        });
+    };
+
+    const recordModuleExecutionResult = (id: ModuleId, result: ModuleExecutionResult) => {
+        const normalizedScreenshotPaths: string[] = [];
+        for (const screenshotPath of result.screenshotPaths) {
+            const nextPaths = appendProjectArtifactPath(capturedScreenshotPaths, screenshotPath, projectRoot);
+            const normalizedPath = nextPaths[nextPaths.length - 1];
+            capturedScreenshotPaths = nextPaths;
+            if (normalizedPath) {
+                normalizedScreenshotPaths.push(normalizedPath);
+            }
+        }
+
+        markModuleOutcome(id, result.status, [...result.evidence, ...normalizedScreenshotPaths]);
+    };
+
+    const checkpoint = async (snapshot: Omit<RuntimeStateSnapshot, 'version' | 'run_id' | 'updated_at' | 'project_root' | 'mode' | 'module_outcomes'>) => {
         const updatedAt = new Date().toISOString();
         const fullSnapshot: RuntimeStateSnapshot = {
             version: '1.0',
@@ -127,6 +203,7 @@ async function main() {
             project_root: projectRoot,
             mode: modeLabel,
             ...snapshot,
+            module_outcomes: snapshotModuleOutcomes(),
         };
         writeRuntimeState(fullSnapshot, runtimePaths);
         lastCheckpoint = fullSnapshot;
@@ -197,7 +274,100 @@ async function main() {
             anomalies: [],
             evidence: {
                 log_path: runlogPath,
-                screenshot_paths: [],
+                screenshot_paths: capturedScreenshotPaths.slice(),
+                dom_snapshot_path: null,
+            },
+        });
+
+        const preflight = validatePreflight(data, executionPlan, yamlPath);
+        for (const warning of preflight.warnings) {
+            console.log(`   ⚠️  Preflight: ${warning}`);
+        }
+
+        if (!preflight.ok) {
+            for (const error of preflight.errors) {
+                console.error(`   ❌ Preflight: ${error}`);
+            }
+            await checkpoint({
+                status: 'blocked',
+                state: { code: 'S0', name: 'Preflight', attempt: 1, retry_budget: 2 },
+                module: {
+                    id: 'preflight',
+                    name: '预检',
+                    step: 'validate_selected_modules',
+                    sequence_index: 0,
+                    sequence_total: 6,
+                },
+                target: {
+                    field_label: path.basename(yamlPath),
+                    expected_value: executionPlan.moduleIds.join(', '),
+                    control_type: 'validation',
+                    selector_scope: 'global',
+                },
+                last_action: {
+                    kind: 'validate_preflight',
+                    description: preflight.errors.join(' | '),
+                    started_at: new Date().toISOString(),
+                    ended_at: new Date().toISOString(),
+                    result: 'blocked',
+                },
+                next_expected_action: {
+                    kind: 'fix_input_data',
+                    field_label: 'preflight',
+                    expected_value: 'all gates pass',
+                },
+                gates: [
+                    { name: 'yaml_loaded', passed: true, evidence: yamlPath },
+                    ...preflight.gates,
+                ],
+                anomalies: [],
+                evidence: {
+                    log_path: runlogPath,
+                    screenshot_paths: capturedScreenshotPaths.slice(),
+                    dom_snapshot_path: null,
+                },
+            });
+            process.exitCode = 1;
+            await runlogMirror.close().catch(() => { });
+            return;
+        }
+
+        await checkpoint({
+            status: 'running',
+            state: { code: 'S0', name: 'Preflight', attempt: 1, retry_budget: 2 },
+            module: {
+                id: 'preflight',
+                name: '预检',
+                step: 'validate_selected_modules',
+                sequence_index: 0,
+                sequence_total: 6,
+            },
+            target: {
+                field_label: path.basename(yamlPath),
+                expected_value: executionPlan.moduleIds.join(', '),
+                control_type: 'validation',
+                selector_scope: 'global',
+            },
+            last_action: {
+                kind: 'validate_preflight',
+                description: `Validated selected modules: ${executionPlan.moduleIds.join(', ')}`,
+                started_at: new Date().toISOString(),
+                ended_at: new Date().toISOString(),
+                result: 'ok',
+            },
+            next_expected_action: {
+                kind: 'open_publish_page',
+                field_label: 'publish',
+                expected_value: 'ready',
+            },
+            gates: [
+                { name: 'yaml_loaded', passed: true, evidence: yamlPath },
+                ...preflight.gates,
+            ],
+            anomalies: [],
+            evidence: {
+                log_path: runlogPath,
+                screenshot_paths: capturedScreenshotPaths.slice(),
                 dom_snapshot_path: null,
             },
         });
@@ -258,6 +428,10 @@ async function main() {
             }
         }
 
+        if (keepOpen) {
+            await ensureAutomationPageVisible(page);
+        }
+
         await checkpoint({
             status: 'running',
             state: { code: 'S1', name: 'LoginReady', attempt: 1, retry_budget: 2 },
@@ -308,7 +482,8 @@ async function main() {
         }
 
         // 5. 截图：开始前
-        await screenshot(page, 'before_fill');
+        const beforeFillScreenshotPath = await screenshot(page, 'before_fill');
+        capturedScreenshotPaths = appendProjectArtifactPath(capturedScreenshotPaths, beforeFillScreenshotPath, projectRoot);
 
         // ========================================================
         // 6. 逐模块填写
@@ -323,10 +498,16 @@ async function main() {
             status: 'running',
         }, 'module1_running');
         if (shouldRunModule(executionPlan, '1b')) {
+            activeModuleId = '1b';
             await fillTitle(page, data);          // 1b 标题（测试流程先填标题）
+            markModuleOutcome('1b', 'auto_ok', 'title_filled');
+            activeModuleId = null;
         }
         if (shouldRunModule(executionPlan, '1a')) {
+            activeModuleId = '1a';
             await fillCategory(page, data);       // 1a 类目
+            markModuleOutcome('1a', 'auto_ok', 'category_locked');
+            activeModuleId = null;
             await checkpoint({
                 status: 'running',
                 state: { code: 'S2', name: 'CategoryLocked', attempt: 1, retry_budget: 2 },
@@ -361,26 +542,36 @@ async function main() {
                 anomalies: [],
                 evidence: {
                     log_path: runlogPath,
-                    screenshot_paths: [],
+                    screenshot_paths: capturedScreenshotPaths.slice(),
                     dom_snapshot_path: null,
                 },
             });
         }
         if (shouldRunModule(executionPlan, '1c')) {
-            await fillCarouselImages(page, data); // 1c 商品图片 ×6
+            activeModuleId = '1c';
+            const carouselResult = await fillCarouselImages(page, data); // 1c 商品图片 ×6
+            recordModuleExecutionResult('1c', carouselResult);
+            activeModuleId = null;
         }
         if (shouldRunModule(executionPlan, '1d')) {
-            await fillMarketingImages(page, data); // 1d 营销图 ×2
+            activeModuleId = '1d';
+            const marketingResult = await fillMarketingImages(page, data); // 1d 营销图 ×2
+            recordModuleExecutionResult('1d', marketingResult);
+            activeModuleId = null;
         }
         if (shouldRunModule(executionPlan, '1e')) {
+            activeModuleId = '1e';
             if (requiresVideoCategoryBootstrap(executionPlan)) {
                 await bootstrapVideoCategoryFromRecent(page, data);
             }
-            await fillVideo(page, data);          // 1e 视频
+            const videoResult = await fillVideo(page, data);          // 1e 视频
+            recordModuleExecutionResult('1e', videoResult);
+            activeModuleId = null;
         }
 
         // --- 模块 2: 商品属性 ---
         if (shouldRunModule(executionPlan, '2')) {
+            activeModuleId = '2';
             await setVisualStatus({
                 state: { code: 'S2', name: 'CategoryLocked' },
                 module: { name: '商品属性' },
@@ -389,6 +580,8 @@ async function main() {
                 status: 'running',
             }, 'module2_running');
             await fillAttributes(page, data);
+            markModuleOutcome('2', 'auto_ok', 'module2_completed');
+            activeModuleId = null;
             await checkpoint({
                 status: 'running',
                 state: { code: 'S3', name: 'Module2Stable', attempt: 1, retry_budget: 2 },
@@ -423,7 +616,7 @@ async function main() {
                 anomalies: [],
                 evidence: {
                     log_path: runlogPath,
-                    screenshot_paths: [],
+                    screenshot_paths: capturedScreenshotPaths.slice(),
                     dom_snapshot_path: null,
                 },
             });
@@ -431,10 +624,17 @@ async function main() {
 
         // --- 模块 3-4: 海关 + 价格设置 ---
         if (shouldRunModule(executionPlan, '3')) {
-            await fillCustoms(page, data);
+            activeModuleId = '3';
+            const customsManualGateScreenshot = await fillCustoms(page, data);
+            capturedScreenshotPaths = appendProjectArtifactPath(capturedScreenshotPaths, customsManualGateScreenshot, projectRoot);
+            markModuleOutcome('3', data.customs?.hs_code ? 'manual_gate' : 'detect_only', data.customs?.hs_code ? 'customs_manual_gate_or_default' : 'customs_default');
+            activeModuleId = null;
         }
         if (shouldRunModule(executionPlan, '4')) {
+            activeModuleId = '4';
             await fillPricingSettings(page, data);
+            markModuleOutcome('4', 'auto_ok', 'pricing_settings_done');
+            activeModuleId = null;
         }
         if (executionPlan.modeKind === 'smoke') {
             console.log('\n⏭️  SMOKE: 跳过模块 3-4');
@@ -442,6 +642,7 @@ async function main() {
 
         // --- 模块 5: SKU 变体 ---
         if (shouldRunModule(executionPlan, '5')) {
+            activeModuleId = '5';
             await setVisualStatus({
                 state: { code: 'S3', name: 'Module2Stable' },
                 module: { name: '销售属性与 SKU 图片' },
@@ -449,8 +650,19 @@ async function main() {
                 last_action: { description: '进入 SKU 颜色、批量填充与图片流程' },
                 status: 'running',
             }, 'module5_running');
-            await fillSKUs(page, data);               // 价格/库存/名称
-            await fillSKUImages(page, data);          // SKU 图片
+            const reportModule5Progress = async (event: Module5ProgressEvent) => {
+                await setVisualStatus({
+                    state: { code: 'S3', name: 'Module2Stable' },
+                    module: { name: '销售属性与 SKU 图片' },
+                    target: { field_label: event.field },
+                    last_action: { description: event.details, kind: event.action },
+                    status: 'running',
+                }, event.action);
+            };
+            await fillSKUs(page, data, { onProgress: reportModule5Progress }); // 价格/库存/名称
+            await fillSKUImages(page, data, { onProgress: reportModule5Progress }); // SKU 图片
+            markModuleOutcome('5', 'auto_ok', 'sku_images_done');
+            activeModuleId = null;
             await checkpoint({
                 status: 'running',
                 state: { code: 'S4', name: 'SkuImagesDone', attempt: 1, retry_budget: 2 },
@@ -485,24 +697,44 @@ async function main() {
                 anomalies: [],
                 evidence: {
                     log_path: runlogPath,
-                    screenshot_paths: [],
+                    screenshot_paths: capturedScreenshotPaths.slice(),
                     dom_snapshot_path: null,
                 },
             });
         }
 
         if (shouldRunModule(executionPlan, '6a')) {
+            activeModuleId = '6a';
             // --- 模块 6: 详情描述 ---
             await fillBuyersNote(page, data);
+            markModuleOutcome('6a', 'auto_ok', 'buyers_note_done');
+            activeModuleId = null;
         }
         if (shouldRunModule(executionPlan, '6b')) {
-            await fillDetailImages(page, data);
+            activeModuleId = '6b';
+            const detailImagesResult = await fillDetailImages(page, data);
+            recordModuleExecutionResult('6b', detailImagesResult);
+            activeModuleId = null;
+        }
+        if (shouldRunModule(executionPlan, '6c')) {
+            activeModuleId = '6c';
+            const appDescriptionManualGateScreenshot = await fillAppDescriptionManualGate(page, data);
+            capturedScreenshotPaths = appendProjectArtifactPath(capturedScreenshotPaths, appDescriptionManualGateScreenshot, projectRoot);
+            markModuleOutcome('6c', 'manual_gate', 'app_description_manual_gate');
+            activeModuleId = null;
         }
         if (shouldRunModule(executionPlan, '7')) {
+            activeModuleId = '7';
             await fillShipping(page, data);
+            markModuleOutcome('7', 'auto_ok', 'shipping_done');
+            activeModuleId = null;
         }
         if (shouldRunModule(executionPlan, '8')) {
-            await fillOtherSettings(page, data);
+            activeModuleId = '8';
+            const otherSettingsManualGateScreenshot = await fillOtherSettings(page, data);
+            capturedScreenshotPaths = appendProjectArtifactPath(capturedScreenshotPaths, otherSettingsManualGateScreenshot, projectRoot);
+            markModuleOutcome('8', 'manual_gate', 'other_settings_manual_gate');
+            activeModuleId = null;
         }
         if (executionPlan.modeKind === 'smoke') {
             console.log('\n⏭️  SMOKE: 跳过模块 6-8');
@@ -511,7 +743,8 @@ async function main() {
         // ========================================================
         // 7. 填写完成 — 等待人工确认
         // ========================================================
-        await screenshot(page, 'after_fill');
+        const afterFillScreenshotPath = await screenshot(page, 'after_fill');
+        capturedScreenshotPaths = appendProjectArtifactPath(capturedScreenshotPaths, afterFillScreenshotPath, projectRoot);
         await checkpoint({
             status: 'waiting_human',
             state: { code: 'S5', name: 'Verify', attempt: 1, retry_budget: 2 },
@@ -546,10 +779,19 @@ async function main() {
             anomalies: [],
             evidence: {
                 log_path: runlogPath,
-                screenshot_paths: [],
+                screenshot_paths: capturedScreenshotPaths.slice(),
                 dom_snapshot_path: null,
             },
         });
+
+        if (lastCheckpoint) {
+            const handoffArtifacts = syncLatestManualHandoff(lastCheckpoint, projectRoot, 'runtime/state.json');
+            if (handoffArtifacts) {
+                console.log('\n🧾 已生成人工交接摘要:');
+                console.log(`   JSON: ${handoffArtifacts.json_path}`);
+                console.log(`   Markdown: ${handoffArtifacts.markdown_path}`);
+            }
+        }
 
         console.log('\n' + '='.repeat(50));
         console.log('✅ 自动填写完成！');
@@ -561,6 +803,10 @@ async function main() {
         console.log('  □ SKU 名称/价格是否正确');
         console.log('  □ 买家须知是否正常显示');
         console.log('  □ 重量/尺寸是否合理');
+
+        if (keepOpen) {
+            await ensureAutomationPageVisible(page);
+        }
 
         await waitForHumanConfirmation('确认无误后按 Enter 保存登录状态并退出 (请手动点击发布按钮)');
 
@@ -600,7 +846,7 @@ async function main() {
             anomalies: [],
             evidence: {
                 log_path: runlogPath,
-                screenshot_paths: [],
+                screenshot_paths: capturedScreenshotPaths.slice(),
                 dom_snapshot_path: null,
             },
         });
@@ -608,8 +854,18 @@ async function main() {
     } catch (error) {
         process.exitCode = 1;
         const updatedAt = new Date().toISOString();
+        let errorScreenshotPath: string | null = null;
+        try {
+            errorScreenshotPath = await screenshot(page, 'error');
+            capturedScreenshotPaths = appendProjectArtifactPath(capturedScreenshotPaths, errorScreenshotPath, projectRoot);
+        } catch {
+            console.error('⚠️  错误截图失败');
+        }
         if (lastCheckpoint) {
             const failedCheckpoint = lastCheckpoint as RuntimeStateSnapshot;
+            if (activeModuleId) {
+                markModuleOutcome(activeModuleId, 'failed', error instanceof Error ? error.message : String(error));
+            }
             writeRuntimeState({
                 ...failedCheckpoint,
                 updated_at: updatedAt,
@@ -621,12 +877,14 @@ async function main() {
                     ended_at: updatedAt,
                     result: 'error',
                 },
+                module_outcomes: snapshotModuleOutcomes(),
+                evidence: {
+                    ...failedCheckpoint.evidence,
+                    screenshot_paths: capturedScreenshotPaths.slice(),
+                },
             }, runtimePaths);
         }
         console.error('\n❌ 执行出错:', error);
-        await screenshot(page, 'error').catch(() => {
-            console.error('⚠️  错误截图失败');
-        });
     } finally {
         if (keepOpen) {
             if (browserVideoConfig.enabled) {

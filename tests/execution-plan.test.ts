@@ -18,10 +18,20 @@ test('parseRequestedModules supports split --module value and aliases', () => {
   assert.deepEqual(parsed, ['1e']);
 });
 
+test('parseRequestedModules supports app description module alias', () => {
+  const parsed = parseRequestedModules(['../products/test.yaml', '--module', 'app_description']);
+  assert.deepEqual(parsed, ['6c']);
+});
+
 test('buildExecutionPlan uses smoke defaults when no explicit module selection exists', () => {
   const plan = buildExecutionPlan({ smoke: true, requestedModules: null });
   assert.deepEqual(plan.moduleIds, ['1b', '1a', '1c', '1d', '1e', '2', '5']);
   assert.equal(plan.modeLabel, 'smoke');
+});
+
+test('buildExecutionPlan full sequence includes app description after detail images', () => {
+  const plan = buildExecutionPlan({ smoke: false, requestedModules: null });
+  assert.deepEqual(plan.moduleIds, ['1b', '1a', '1c', '1d', '1e', '2', '3', '4', '5', '6a', '6b', '6c', '7', '8']);
 });
 
 test('buildExecutionPlan lets explicit module selection override smoke defaults', () => {

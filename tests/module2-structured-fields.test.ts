@@ -441,3 +441,117 @@ test('fillAttributes does not blindly select changed real-page options when prod
 
   await page3.close();
 });
+
+test('fillAttributes aborts voltage dropdown fallback when visible options drift away from expected hints', async () => {
+  const page4 = await browser.newPage();
+  await page4.setContent(`
+<!doctype html>
+<html>
+  <body>
+    <section id="attrs">
+      <h2>商品属性</h2>
+      <div class="field-row" data-field="voltage">
+        <div class="field-label"><span>电压</span></div>
+        <div class="field-control">
+          <div id="voltage-trigger" class="ait-select" tabindex="0">
+            <span class="ait-select-selection-item">请选择</span>
+          </div>
+        </div>
+      </div>
+    </section>
+    <div id="overlay" style="display:none"></div>
+    <script>
+      const trigger = document.getElementById('voltage-trigger');
+      const overlay = document.getElementById('overlay');
+      const display = trigger.querySelector('.ait-select-selection-item');
+      const options = ['36伏(36 V)', '48伏(48 V)'];
+      let activeIndex = -1;
+      window.__voltageArrowDown = 0;
+      window.__voltageEnter = 0;
+
+      const closeOverlay = () => {
+        overlay.style.display = 'none';
+        overlay.innerHTML = '';
+        activeIndex = -1;
+      };
+
+      const commitOption = (index) => {
+        if (index < 0 || index >= options.length) return;
+        display.textContent = options[index];
+        closeOverlay();
+      };
+
+      const renderOverlay = () => {
+        overlay.innerHTML = '';
+        options.forEach((label, index) => {
+          const option = document.createElement('div');
+          option.setAttribute('role', 'option');
+          option.textContent = label;
+          option.addEventListener('click', () => commitOption(index));
+          overlay.appendChild(option);
+        });
+      };
+
+      trigger.addEventListener('click', (event) => {
+        event.stopPropagation();
+        renderOverlay();
+        overlay.style.display = 'block';
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'ArrowDown') {
+          window.__voltageArrowDown += 1;
+          if (overlay.style.display === 'block') {
+            activeIndex = Math.min(activeIndex + 1, options.length - 1);
+          }
+        }
+        if (event.key === 'Enter') {
+          window.__voltageEnter += 1;
+          if (overlay.style.display === 'block' && activeIndex >= 0) {
+            commitOption(activeIndex);
+          }
+        }
+        if (event.key === 'Escape') {
+          closeOverlay();
+        }
+      });
+    </script>
+  </body>
+</html>
+  `);
+
+  const data = makeProductData();
+  data.attributes.brand = '';
+  data.attributes.origin = '';
+  data.attributes.product_type = '';
+  data.attributes.hazardous_chemical = '';
+  data.attributes.accessory_position = '';
+
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (...args: unknown[]) => {
+    logs.push(args.map((arg) => String(arg)).join(' '));
+  };
+
+  try {
+    await fillAttributes(page4, data);
+  } finally {
+    console.log = originalLog;
+  }
+
+  const values = await page4.evaluate(() => ({
+    voltageText: document.querySelector('#voltage-trigger .ait-select-selection-item')?.textContent?.trim() || '',
+    overlayVisible: document.getElementById('overlay')?.style.display === 'block',
+    arrowDown: (window as typeof window & { __voltageArrowDown: number }).__voltageArrowDown,
+    enter: (window as typeof window & { __voltageEnter: number }).__voltageEnter,
+  }));
+
+  assert.equal(values.voltageText, '请选择');
+  assert.equal(values.overlayVisible, false);
+  assert.equal(values.arrowDown, 0);
+  assert.equal(values.enter, 0);
+  assert.ok(logs.some((line) => line.includes('当前真实交互与预期不一致')));
+  assert.ok(logs.some((line) => line.includes('↪️  属性未命中: 电压')));
+
+  await page4.close();
+});

@@ -10,6 +10,7 @@ import {
   normalizeSupervisorIntervention,
   readFreshIntervention,
   shouldPauseForSupervisor,
+  upsertModuleOutcome,
   writeRuntimeState,
 } from '../src/runtime-supervision';
 
@@ -36,6 +37,20 @@ test('writeRuntimeState writes runtime/state.json', () => {
     target: { field_label: 'none', expected_value: 'none', control_type: 'system', selector_scope: 'global' },
     last_action: { kind: 'init', description: 'boot', started_at: '2026-03-06T18:00:00+08:00', ended_at: '2026-03-06T18:00:00+08:00', result: 'ok' },
     next_expected_action: { kind: 'navigate', field_label: 'publish', expected_value: 'open' },
+    module_outcomes: [
+      {
+        id: '1a',
+        name: '类目',
+        status: 'auto_ok',
+        evidence: ['recent_category_selected'],
+      },
+      {
+        id: '6c',
+        name: 'APP 描述',
+        status: 'manual_gate',
+        evidence: ['app_description_manual_gate'],
+      },
+    ],
     gates: [],
     anomalies: [],
     evidence: { log_path: '', screenshot_paths: [], dom_snapshot_path: null },
@@ -45,6 +60,20 @@ test('writeRuntimeState writes runtime/state.json', () => {
   const parsed = JSON.parse(raw);
   assert.equal(parsed.run_id, 'run-test');
   assert.equal(parsed.state.code, 'S0');
+  assert.deepEqual(parsed.module_outcomes, [
+    {
+      id: '1a',
+      name: '类目',
+      status: 'auto_ok',
+      evidence: ['recent_category_selected'],
+    },
+    {
+      id: '6c',
+      name: 'APP 描述',
+      status: 'manual_gate',
+      evidence: ['app_description_manual_gate'],
+    },
+  ]);
 });
 
 test('readFreshIntervention ignores stale and mismatched interventions', () => {
@@ -188,4 +217,23 @@ test('shouldPauseForSupervisor only pauses on escalate or manual_stop', () => {
   assert.equal(shouldPauseForSupervisor({ decision: 'intervene' } as never), false);
   assert.equal(shouldPauseForSupervisor({ decision: 'escalate' } as never), true);
   assert.equal(shouldPauseForSupervisor({ decision: 'manual_stop' } as never), true);
+});
+
+test('upsertModuleOutcome replaces existing module outcome in place order', () => {
+  const outcomes = [
+    { id: '1a', name: '类目', status: 'pending', evidence: [] },
+    { id: '6c', name: 'APP 描述', status: 'pending', evidence: [] },
+  ] as const;
+
+  const updated = upsertModuleOutcome([...outcomes], {
+    id: '6c',
+    name: 'APP 描述',
+    status: 'manual_gate',
+    evidence: ['app_description_manual_gate'],
+  });
+
+  assert.deepEqual(updated, [
+    { id: '1a', name: '类目', status: 'pending', evidence: [] },
+    { id: '6c', name: 'APP 描述', status: 'manual_gate', evidence: ['app_description_manual_gate'] },
+  ]);
 });

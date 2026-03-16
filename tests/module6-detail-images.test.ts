@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { chromium, type Browser, type Page, type Locator } from 'playwright';
 
 import {
@@ -67,6 +68,26 @@ const html = `
         <button id="detail-upload" type="button">上传图片</button>
       </div>
     </section>
+  </body>
+</html>
+`;
+
+const fallbackScopeLeakHtml = `
+<!doctype html>
+<html>
+  <body>
+    <div id="page-shell">
+      <section id="module1-images">
+        <h2>商品主图</h2>
+        <button id="module1-upload" type="button">上传图片</button>
+      </section>
+      <section id="detail-section">
+        <h2>详情描述</h2>
+        <div class="detail-images-panel">
+          <button id="detail-upload" type="button">上传图片</button>
+        </div>
+      </section>
+    </div>
   </body>
 </html>
 `;
@@ -148,4 +169,59 @@ test('fillDetailImages continues after one image fails and still attempts later 
   });
 
   assert.deepEqual(calls, ['s_01.jpg', 's_01.jpg', 's_02.jpg']);
+});
+
+test('fillDetailImages returns manual_gate evidence when any detail image still needs human follow-up', async () => {
+  const data = makeProductData();
+  data.skus = [
+    {
+      name: 'SKU A',
+      image: 'FAMILY SUV/TOYOTA SIENNA/SKUa.jpg',
+      price_cny: 1,
+      declared_value_cny: 1,
+      stock: 1,
+      is_original_box: true,
+    },
+  ];
+  data.detail_images = ['s_01.jpg', 's_02.jpg'];
+
+  const result = await fillDetailImages(page, data, {
+    selectImageFromLibraryFn: async (_page: Page, _uploadBtn: Locator, imagePath: ImageLibraryPath) => {
+      return imagePath.filename === 's_02.jpg';
+    },
+  });
+
+  assert.equal(result.status, 'manual_gate');
+  assert.deepEqual(result.evidence, ['detail_images_manual_gate']);
+  assert.equal(result.screenshotPaths.length, 1);
+  assert.ok(fs.existsSync(result.screenshotPaths[0]));
+
+  fs.rmSync(result.screenshotPaths[0], { force: true });
+});
+
+test('fillDetailImages fallback scope ignores earlier non-detail upload buttons', async () => {
+  await page.setContent(fallbackScopeLeakHtml);
+
+  const data = makeProductData();
+  data.skus = [
+    {
+      name: 'SKU A',
+      image: 'FAMILY SUV/TOYOTA SIENNA/SKUa.jpg',
+      price_cny: 1,
+      declared_value_cny: 1,
+      stock: 1,
+      is_original_box: true,
+    },
+  ];
+  data.detail_images = ['s_01.jpg'];
+
+  const clickedUploadIds: string[] = [];
+  await fillDetailImages(page, data, {
+    selectImageFromLibraryFn: async (_page: Page, uploadBtn: Locator, imagePath: ImageLibraryPath) => {
+      clickedUploadIds.push(await uploadBtn.getAttribute('id') ?? '<missing>');
+      return imagePath.filename === 's_01.jpg';
+    },
+  });
+
+  assert.deepEqual(clickedUploadIds, ['detail-upload']);
 });

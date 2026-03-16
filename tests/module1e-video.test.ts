@@ -1151,6 +1151,106 @@ const htmlMediaCenterConfirmOutsideModal = `
 </html>
 `;
 
+const htmlMediaCenterFalsePositiveClose = `
+<!doctype html>
+<html>
+  <body>
+    <section id="base-info">
+      <div class="product-video-panel">
+        <div>商品视频</div>
+        <div id="video-empty-state">上传视频</div>
+        <div id="video-bound-state" style="display:none;">已绑定视频</div>
+        <button id="open-video-modal" type="button">上传视频</button>
+      </div>
+    </section>
+
+    <div id="video-modal" style="display:none; border: 1px solid #ccc; padding: 12px;">
+      <h3>选择视频</h3>
+      <button id="tab-local" type="button">本地上传</button>
+      <button id="tab-library" type="button">媒体中心</button>
+      <div id="local-pane" style="display:block;">本地上传区域</div>
+      <div id="library-pane" style="display:none;">
+        <div id="all-videos">全部视频</div>
+        <div class="toolbar">
+          <input id="folder-search" placeholder="在此文件夹下搜索" />
+          <button id="folder-search-btn" type="button">搜索</button>
+        </div>
+        <div id="selected-count">已选择: 0</div>
+        <div class="video-card" data-full-name="奔驰w221改装大灯总成.mp4" style="display:inline-block;width:220px;height:320px;position:relative;">
+          <div class="preview-area" style="width:180px;height:220px;background:#111;margin:12px auto 0;position:relative;"></div>
+          <div class="select-hotspot" style="position:absolute;left:20px;top:20px;width:28px;height:28px;background:#fff;border:1px solid #ccc;border-radius:6px;cursor:pointer;"></div>
+          <div class="video-title">奔驰w221改装大灯总成</div>
+          <div class="video-duration">00:37</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-footer" style="display:none;">
+      <button id="confirm-video" type="button" disabled>确定</button>
+    </div>
+
+    <script>
+      const openBtn = document.getElementById('open-video-modal');
+      const modal = document.getElementById('video-modal');
+      const footer = document.getElementById('modal-footer');
+      const localTab = document.getElementById('tab-local');
+      const libraryTab = document.getElementById('tab-library');
+      const localPane = document.getElementById('local-pane');
+      const libraryPane = document.getElementById('library-pane');
+      const allVideos = document.getElementById('all-videos');
+      const searchInput = document.getElementById('folder-search');
+      const searchBtn = document.getElementById('folder-search-btn');
+      const selectedCount = document.getElementById('selected-count');
+      const confirmBtn = document.getElementById('confirm-video');
+
+      function renderCards() {
+        const query = (searchInput.value || '').trim();
+        document.body.dataset.videoSearchQuery = query;
+      }
+
+      function selectCard(card) {
+        document.body.dataset.videoSelected = card.dataset.fullName || '';
+        selectedCount.textContent = '已选择: 1';
+        confirmBtn.disabled = false;
+      }
+
+      openBtn.addEventListener('click', () => {
+        modal.style.display = 'block';
+        footer.style.display = 'block';
+        document.body.dataset.videoModalOpen = 'true';
+      });
+      localTab.addEventListener('click', () => {
+        document.body.dataset.videoTab = 'local';
+        localPane.style.display = 'block';
+        libraryPane.style.display = 'none';
+      });
+      libraryTab.addEventListener('click', () => {
+        document.body.dataset.videoTab = 'library';
+        localPane.style.display = 'none';
+        libraryPane.style.display = 'block';
+      });
+      allVideos.addEventListener('click', () => {
+        document.body.dataset.videoFolder = 'all';
+      });
+      searchBtn.addEventListener('click', renderCards);
+      searchInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') renderCards();
+      });
+      document.querySelector('.select-hotspot')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        selectCard(document.querySelector('.video-card'));
+      });
+      confirmBtn.addEventListener('click', () => {
+        if (confirmBtn.disabled) return;
+        document.body.dataset.videoConfirmed = document.body.dataset.videoSelected || '';
+        modal.style.display = 'none';
+        footer.style.display = 'none';
+      });
+    </script>
+  </body>
+</html>
+`;
+
 let browser: Browser;
 let tempVideoPath: string;
 
@@ -1505,5 +1605,44 @@ test('fillVideo can confirm media center selection when confirm button is render
     assert.equal(values.selected, '奔驰w221改装大灯总成.mp4');
     assert.equal(values.confirmed, '奔驰w221改装大灯总成.mp4');
     assert.match(values.selectedCount, /1/);
+  });
+});
+
+test('fillVideo does not treat modal close as success when product video area is still blank', async () => {
+  await withPage(htmlMediaCenterFalsePositiveClose, async (page) => {
+    const data = makeProductData();
+    data.video_file = '/Users/aiden/Downloads/奔驰w221改装大灯总成.mp4';
+    data.video_selection_mode = 'media_center';
+    const logs: string[] = [];
+    const originalLog = console.log;
+    let result:
+      | { status: string; evidence: string[]; screenshotPaths?: string[] }
+      | undefined;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map((part) => String(part)).join(' '));
+    };
+    try {
+      result = await fillVideo(page, data) as { status: string; evidence: string[]; screenshotPaths?: string[] };
+    } finally {
+      console.log = originalLog;
+    }
+
+    const values = await page.evaluate(() => ({
+      selected: document.body.dataset.videoSelected || '',
+      confirmed: document.body.dataset.videoConfirmed || '',
+      emptyVisible: window.getComputedStyle(document.getElementById('video-empty-state')).display !== 'none',
+      boundVisible: window.getComputedStyle(document.getElementById('video-bound-state')).display !== 'none',
+      modalOpen: window.getComputedStyle(document.getElementById('video-modal')).display !== 'none',
+    }));
+
+    assert.equal(values.selected, '奔驰w221改装大灯总成.mp4');
+    assert.equal(values.confirmed, '奔驰w221改装大灯总成.mp4');
+    assert.equal(values.emptyVisible, true);
+    assert.equal(values.boundVisible, false);
+    assert.equal(values.modalOpen, false);
+    assert.equal(result?.status, 'manual_gate');
+    assert.ok((result?.evidence.length || 0) >= 1);
+    assert.ok((result?.screenshotPaths?.length || 0) >= 1);
+    assert.equal(logs.some((line) => line.includes('✅ 视频上传完成')), false);
   });
 });

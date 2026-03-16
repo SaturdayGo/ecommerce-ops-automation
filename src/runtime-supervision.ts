@@ -9,6 +9,21 @@ export interface RuntimePaths {
   interventionRawPath: string;
 }
 
+export type ModuleOutcomeStatus =
+  | 'pending'
+  | 'auto_ok'
+  | 'manual_gate'
+  | 'detect_only'
+  | 'failed'
+  | 'skipped';
+
+export interface ModuleOutcome {
+  id: string;
+  name: string;
+  status: ModuleOutcomeStatus;
+  evidence: string[];
+}
+
 export interface RuntimeStateSnapshot {
   version: '1.0';
   run_id: string;
@@ -47,6 +62,7 @@ export interface RuntimeStateSnapshot {
     field_label: string;
     expected_value: string;
   };
+  module_outcomes: ModuleOutcome[];
   gates: Array<{
     name: string;
     passed: boolean;
@@ -125,6 +141,28 @@ export function getRuntimePaths(projectRoot: string = DEFAULT_PROJECT_ROOT): Run
 export function writeRuntimeState(snapshot: RuntimeStateSnapshot, paths: RuntimePaths = getRuntimePaths(snapshot.project_root)): void {
   fs.mkdirSync(paths.runtimeDir, { recursive: true });
   fs.writeFileSync(paths.statePath, JSON.stringify(snapshot, null, 2) + '\n', 'utf8');
+}
+
+export function upsertModuleOutcome(outcomes: ModuleOutcome[], next: ModuleOutcome): ModuleOutcome[] {
+  const normalizedNext: ModuleOutcome = {
+    id: next.id,
+    name: next.name,
+    status: next.status,
+    evidence: [...next.evidence],
+  };
+  const index = outcomes.findIndex((outcome) => outcome.id === next.id);
+  if (index === -1) {
+    return [...outcomes, normalizedNext];
+  }
+
+  const cloned = outcomes.map((outcome) => ({
+    id: outcome.id,
+    name: outcome.name,
+    status: outcome.status,
+    evidence: [...outcome.evidence],
+  }));
+  cloned[index] = normalizedNext;
+  return cloned;
 }
 
 function parseJsonFile<T>(filePath: string): T | null {

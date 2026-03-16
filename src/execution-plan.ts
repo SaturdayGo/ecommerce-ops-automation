@@ -10,6 +10,7 @@ export type ModuleId =
   | '5'
   | '6a'
   | '6b'
+  | '6c'
   | '7'
   | '8';
 
@@ -33,6 +34,7 @@ const FULL_MODULE_SEQUENCE: ModuleId[] = [
   '5',
   '6a',
   '6b',
+  '6c',
   '7',
   '8',
 ];
@@ -51,6 +53,7 @@ const MODULE_ALIASES: Record<string, ModuleId> = {
   '5': '5',
   '6a': '6a',
   '6b': '6b',
+  '6c': '6c',
   '7': '7',
   '8': '8',
   module1a: '1a',
@@ -64,6 +67,7 @@ const MODULE_ALIASES: Record<string, ModuleId> = {
   module5: '5',
   module6a: '6a',
   module6b: '6b',
+  module6c: '6c',
   module7: '7',
   module8: '8',
   category: '1a',
@@ -78,6 +82,8 @@ const MODULE_ALIASES: Record<string, ModuleId> = {
   sku_images: '5',
   buyers_note: '6a',
   detail_images: '6b',
+  app_description: '6c',
+  app: '6c',
   shipping: '7',
   other: '8',
 };

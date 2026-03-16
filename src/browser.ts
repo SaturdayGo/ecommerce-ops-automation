@@ -13,6 +13,24 @@ const MODERN_PUBLISH_PATH_MARKER = '/m_apps/product-publish-v2/pop';
 
 const USER_DATA_DIR = path.resolve(__dirname, '../.auth/chrome-profile');
 
+interface ChromeFrontWindowState {
+    title: string;
+    url: string;
+}
+
+interface VisibilityDeps {
+    activateChrome?: () => Promise<void> | void;
+    getFrontChromeWindow?: () => Promise<ChromeFrontWindowState | null> | ChromeFrontWindowState | null;
+}
+
+function writeBrowserLaunchMarker(): void {
+    const markerPath = process.env.AUTOMATION_TEST_BROWSER_LAUNCH_MARKER?.trim();
+    if (!markerPath) return;
+
+    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+    fs.writeFileSync(markerPath, new Date().toISOString() + '\n', 'utf8');
+}
+
 // ============================================================
 // 浏览器管理
 // ============================================================
@@ -58,6 +76,7 @@ function cleanupChromeProfile(userDataDir: string): void {
  */
 export async function launchBrowser(options: { recordVideoDir?: string } = {}): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
     console.log('🌐 正在启动独立配置的系统 Chrome...');
+    writeBrowserLaunchMarker();
 
     if (!fs.existsSync(USER_DATA_DIR)) {
         fs.mkdirSync(USER_DATA_DIR, { recursive: true });
@@ -98,6 +117,87 @@ export async function launchBrowser(options: { recordVideoDir?: string } = {}): 
         }
         throw error;
     }
+}
+
+function isPublishWindowUrl(url: string): boolean {
+    return url.includes('aliexpress.com')
+        && (
+            isLegacyPublishUrl(url)
+            || isModernPublishUrl(url)
+            || url.includes('product_publish')
+        );
+}
+
+async function activateChromeApp(): Promise<void> {
+    if (process.platform !== 'darwin') return;
+    try {
+        execSync(`osascript -e 'tell application "Google Chrome" to activate'`, {
+            stdio: 'ignore',
+            timeout: 5000,
+        });
+    } catch {
+        // Ignore activation failures; visibility gate below will catch mismatch.
+    }
+}
+
+async function getFrontChromeWindowState(): Promise<ChromeFrontWindowState | null> {
+    if (process.platform !== 'darwin') return null;
+    try {
+        const output = execSync(
+            `osascript -e 'tell application "Google Chrome" to if (count of windows) is 0 then return ""' ` +
+            `-e 'tell application "Google Chrome" to return (title of active tab of front window) & linefeed & (URL of active tab of front window)'`,
+            { encoding: 'utf-8', timeout: 5000 }
+        ).trim();
+        if (!output) return null;
+        const [title, url] = output.split('\n');
+        if (!url) return null;
+        return {
+            title: title?.trim() || '',
+            url: url.trim(),
+        };
+    } catch {
+        return null;
+    }
+}
+
+async function sleep(waitMs: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+}
+
+export async function ensureAutomationPageVisible(
+    page: Page,
+    options: {
+        attempts?: number;
+        waitMs?: number;
+        deps?: VisibilityDeps;
+    } = {},
+): Promise<void> {
+    const attempts = options.attempts ?? 4;
+    const waitMs = options.waitMs ?? 500;
+    const activateChrome = options.deps?.activateChrome ?? activateChromeApp;
+    const getFrontChromeWindow = options.deps?.getFrontChromeWindow ?? getFrontChromeWindowState;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        await page.bringToFront().catch(() => { });
+        await page.evaluate(() => { window.focus(); }).catch(() => { });
+        await activateChrome();
+
+        const frontWindow = await getFrontChromeWindow();
+        if (frontWindow && isPublishWindowUrl(frontWindow.url)) {
+            console.log(`👁️  前台可视校验通过: ${frontWindow.title || frontWindow.url}`);
+            return;
+        }
+
+        if (attempt < attempts) {
+            await sleep(waitMs);
+        }
+    }
+
+    const frontWindow = await getFrontChromeWindow();
+    const debugLabel = frontWindow
+        ? `${frontWindow.title || '(无标题)'} | ${frontWindow.url}`
+        : 'front-window-unavailable';
+    throw new Error(`Automation page not visible in front Chrome window: ${debugLabel}`);
 }
 
 /**
@@ -298,14 +398,38 @@ export async function waitForSellerLogin(page: Page): Promise<boolean> {
 /**
  * 截图工具 — 每次操作前后对比
  */
-export async function screenshot(page: Page, name: string): Promise<void> {
+export async function screenshot(page: Page, name: string): Promise<string> {
     const dir = path.resolve(__dirname, '../screenshots');
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
     const filepath = path.join(dir, `${name}_${Date.now()}.png`);
-    await page.screenshot({ path: filepath, fullPage: false });
+    try {
+        await page.screenshot({ path: filepath, fullPage: false });
+    } catch (error) {
+        const contextWithCdp = page.context() as {
+            newCDPSession?: (page: Page) => Promise<{
+                send: (method: string, params?: Record<string, unknown>) => Promise<{ data: string }>;
+                detach?: () => Promise<void>;
+            }>;
+        };
+        if (!(error instanceof Error) || error.name !== 'TimeoutError' || typeof contextWithCdp.newCDPSession !== 'function') {
+            throw error;
+        }
+
+        console.log('   ↪️  截图等待字体超时，回退到 CDP capture');
+        const session = await contextWithCdp.newCDPSession(page);
+        try {
+            const { data } = await session.send('Page.captureScreenshot', { format: 'png' });
+            fs.writeFileSync(filepath, Buffer.from(data, 'base64'));
+        } finally {
+            if (typeof session.detach === 'function') {
+                await session.detach().catch(() => { });
+            }
+        }
+    }
     console.log(`📸 截图: ${filepath}`);
+    return filepath;
 }
 
 /**

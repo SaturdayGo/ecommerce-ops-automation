@@ -141,3 +141,111 @@ test('fillShipping writes module 7 values without touching module 5 lookalike in
   assert.equal(values.skuWidth, '');
   assert.equal(values.skuHeight, '');
 });
+
+test('fillShipping does not keep long fixed or random waits when shipping inputs are already visible', async () => {
+  const started = Date.now();
+
+  await fillShipping(page, makeProductData());
+
+  const elapsedMs = Date.now() - started;
+  const values = await page.evaluate(() => ({
+    shippingWeight: (document.getElementById('shipping-weight') as HTMLInputElement).value,
+    shippingLength: (document.getElementById('shipping-length') as HTMLInputElement).value,
+    shippingWidth: (document.getElementById('shipping-width') as HTMLInputElement).value,
+    shippingHeight: (document.getElementById('shipping-height') as HTMLInputElement).value,
+  }));
+
+  assert.equal(values.shippingWeight, '7.5');
+  assert.equal(values.shippingLength, '65');
+  assert.equal(values.shippingWidth, '35');
+  assert.equal(values.shippingHeight, '28');
+  assert.ok(elapsedMs < 2500, `shipping flow stayed too slow in immediate-ready DOM: ${elapsedMs}ms`);
+});
+
+test('fillShipping does not keep repeated post-fill waits when shipping inputs echo value immediately', async () => {
+  const waitCalls: number[] = [];
+  const originalWaitForTimeout = page.waitForTimeout.bind(page);
+  (page as Page & { waitForTimeout: (timeout: number) => Promise<void> }).waitForTimeout = async (timeout: number) => {
+    waitCalls.push(timeout);
+    return undefined;
+  };
+
+  try {
+    await fillShipping(page, makeProductData());
+  } finally {
+    (page as Page & { waitForTimeout: typeof originalWaitForTimeout }).waitForTimeout = originalWaitForTimeout;
+  }
+
+  const values = await page.evaluate(() => ({
+    shippingWeight: (document.getElementById('shipping-weight') as HTMLInputElement).value,
+    shippingLength: (document.getElementById('shipping-length') as HTMLInputElement).value,
+    shippingWidth: (document.getElementById('shipping-width') as HTMLInputElement).value,
+    shippingHeight: (document.getElementById('shipping-height') as HTMLInputElement).value,
+  }));
+
+  assert.equal(values.shippingWeight, '7.5');
+  assert.equal(values.shippingLength, '65');
+  assert.equal(values.shippingWidth, '35');
+  assert.equal(values.shippingHeight, '28');
+  assert.ok(Math.max(...waitCalls, 0) < 100, `unexpected post-fill waits: ${waitCalls.join(', ')}`);
+});
+
+test('fillShipping does not keep a fixed long wait after opening the shipping tab when fields appear immediately', async () => {
+  const page2 = await browser.newPage();
+  await page2.setContent(`
+<!doctype html>
+<html>
+  <body>
+    <button id="shipping-tab" role="tab" type="button">包装与物流</button>
+    <section id="module7" style="display:none">
+      <h2>包装与物流</h2>
+      <div class="field-row">
+        <div class="field-label"><span>总重量</span></div>
+        <div class="field-control"><input id="shipping-weight" placeholder="重量" value="" /></div>
+      </div>
+      <div class="field-row">
+        <div class="field-label"><span>包装尺寸</span></div>
+        <div class="field-control dims">
+          <input id="shipping-length" placeholder="长" value="" />
+          <input id="shipping-width" placeholder="宽" value="" />
+          <input id="shipping-height" placeholder="高" value="" />
+        </div>
+      </div>
+    </section>
+    <script>
+      document.getElementById('shipping-tab').addEventListener('click', () => {
+        document.getElementById('module7').style.display = 'block';
+      });
+    </script>
+  </body>
+</html>
+  `);
+
+  const waitCalls: number[] = [];
+  const originalWaitForTimeout = page2.waitForTimeout.bind(page2);
+  (page2 as Page & { waitForTimeout: (timeout: number) => Promise<void> }).waitForTimeout = async (timeout: number) => {
+    waitCalls.push(timeout);
+    return undefined;
+  };
+
+  try {
+    await fillShipping(page2, makeProductData());
+  } finally {
+    (page2 as Page & { waitForTimeout: typeof originalWaitForTimeout }).waitForTimeout = originalWaitForTimeout;
+  }
+
+  const values = await page2.evaluate(() => ({
+    shippingWeight: (document.getElementById('shipping-weight') as HTMLInputElement).value,
+    shippingLength: (document.getElementById('shipping-length') as HTMLInputElement).value,
+    shippingWidth: (document.getElementById('shipping-width') as HTMLInputElement).value,
+    shippingHeight: (document.getElementById('shipping-height') as HTMLInputElement).value,
+  }));
+
+  assert.equal(values.shippingWeight, '7.5');
+  assert.equal(values.shippingLength, '65');
+  assert.equal(values.shippingWidth, '35');
+  assert.equal(values.shippingHeight, '28');
+  assert.ok(Math.max(...waitCalls) < 300, `unexpected tab-open waits: ${waitCalls.join(', ')}`);
+
+  await page2.close();
+});
