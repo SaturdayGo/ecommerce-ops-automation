@@ -131,6 +131,22 @@
 **价值:**
 - 这是当前项目的真实 MVP，不是妥协，而是正确边界
 
+### 3.4 Duplicate-Intent Audit
+
+**文件:**
+- [`scripts/duplicate-intent-audit.ts`](/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/scripts/duplicate-intent-audit.ts)
+- [`tests/duplicate-intent-audit.test.ts`](/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/duplicate-intent-audit.test.ts)
+
+**能力:**
+- 扫描 `src/**/*.ts` 的函数目录
+- 用轻量 token 归一化给出“重复意图候选组”
+- 输出 markdown 报告，供结构收缩前人工审计
+
+**价值:**
+- 补上 “shared helper 双真相漂移” 之前的上游视图
+- 让下一轮 `modules.ts` 收缩先看证据，再决定合并对象
+- 借用 `finding-duplicate-functions` 的思路，但不把实验性插件 runtime 引进主仓
+
 ## 4. Candidate Reusable Hooks / Skills
 
 下面这些已经足够成熟，可以继续固化成独立 hook/skill：
@@ -141,6 +157,7 @@
 4. `Recent Bootstrap Hook`
 5. `Runtime Evidence Hook`
 6. `Manual Handoff Summary Hook`
+7. `Duplicate-Intent Audit`
 
 ## 5. 明确不应复用的东西
 

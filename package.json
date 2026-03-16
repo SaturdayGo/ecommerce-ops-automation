@@ -8,6 +8,7 @@
     "full": "tsx src/main.ts",
     "smoke": "tsx src/main.ts --smoke",
     "login": "tsx src/main.ts --login-only",
+    "audit:duplicate-intent": "tsx scripts/duplicate-intent-audit.ts src",
     "test": "node --import tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

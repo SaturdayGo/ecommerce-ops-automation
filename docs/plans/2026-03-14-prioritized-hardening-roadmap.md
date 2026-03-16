@@ -10,6 +10,14 @@
 
 ---
 
+## Status
+
+**This roadmap is now historical.**
+
+- Hardening 主线、truth layer、stable-chain stop rule、closeout 验证都已完成
+- git 集成与 release 也已经执行，见 [`docs/releases/2026-03-16-hardening-closeout-release-note.md`](/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/docs/releases/2026-03-16-hardening-closeout-release-note.md)
+- 当前如果继续本地开发，应改看 [`2026-03-16-post-closeout-maintenance.md`](/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/docs/plans/2026-03-16-post-closeout-maintenance.md)
+
 ## 当前共识
 
 | 模块 | 当前判断 | 说明 |
@@ -166,13 +174,13 @@
 - 最新半自动真实主线结果是：`1c/1d/1e/3/6c/8 -> manual_gate`，`1a/1b/2/4/5/6a/6b/7 -> auto_ok`
 - 这里再次确认：README 中的“稳定 / 人工门禁 / 单独维护”是成熟度与默认策略，不是单次运行结果；单次 run 一律以 `runtime/state.json.module_outcomes` 和 `runtime/latest-handoff.json` 为准
 
-第 6 阶段当前状态：
+第 6 阶段已完成：
 
 6. **development closeout / 文档同步 / 最终交付说明**
    - 项目内收口记录见 [`2026-03-16-hardening-closeout.md`](/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/docs/plans/2026-03-16-hardening-closeout.md)
    - git 提交切片建议见 [`2026-03-16-closeout-commit-slices.md`](/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/docs/plans/2026-03-16-closeout-commit-slices.md)
-   - 技术收口已完成
-   - 当前 git worktree 直接在 `main`，且存在并行脏改动；merge / cleanup 需要人工决定，不自动执行
+   - release note 见 [`docs/releases/2026-03-16-hardening-closeout-release-note.md`](/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/docs/releases/2026-03-16-hardening-closeout-release-note.md)
+   - hardening closeout 已完成、提交、推送并发布
 
 ## 1e 的边界（2026-03-15 修正）
 
@@ -231,3 +239,9 @@
 1. `module5` 耗时归因
 2. 仅在主热点被确认后继续做 stable-chain 微调
 3. 触发停损线后转入收口验证
+
+## After Closeout
+
+如果本地继续开发，不再复用本路线图的“继续执行”语义。
+
+后续新增工作只允许作为 **post-closeout maintenance slice** 单独建计划、单独验证、单独收口。

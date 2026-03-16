@@ -533,3 +533,17 @@
 - failure_signature: 文档把 `1c/1d` 归入“稳定”后，最容易发生的误读是“closeout 主线里它们也必然 auto_ok”。真实半自动 run `run-20260316093829-2dc580` 证明并非如此：当前页面现场里，`1c/1d` 仍可能按条件落成 `manual_gate`。如果继续把成熟度标签当作本轮结果，后续 agent 和人工接手会再次被文档带偏。
 - working_selector_or_action: README / roadmap 里的“稳定 / 人工门禁 / 单独维护”只表达默认策略与成熟度；单次运行真相必须只看 `runtime/state.json.module_outcomes`，人工接手只看 `runtime/latest-handoff.json`。收口验证时必须同时核对 runtime 和 handoff，不能只看 README 表格。
 - rollback_condition: 如果未来要展示更细的成熟度，不要再让一个标签兼任“模块成熟度”和“本轮执行结果”；应新增独立字段，而不是覆盖 per-run truth。
+
+## 2026-03-16 / Stable Chain / Module 5 Retail Header Search Must Treat Visible Row Cells As Ready Signal
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module5-ui-flow.test.ts`
+- relation: enriches
+- failure_signature: 单 SKU 场景下，即使 `td.sell-sku-cell.col-skuPrice/col-cargoPrice/col-skuStock` 已经全部可见可填，只要 fixture 没有显式 `零售价(CNY)` header 或 `批量填充` 按钮，`ensureRetailPriceHeaderVisible()` 仍会盲滚 10 轮并每轮支付 `220ms`。表现是价格/货值/库存最终都写成功了，但单测还会多卡约 `2.2s`，把热点错归到 `fillSkuCellValue()`。
+- working_selector_or_action: `ensureRetailPriceHeaderVisible()` 先检查可见 `sell-sku-cell` 本体，把“row cells already visible”视为 SKU 数值区 ready signal；只有 row cells、retail header、batch button 全都不可见时，才继续滚动和 `220ms` fallback。归因脚本证明热点在前置定位链而不是 `fillSkuCellValue()` 提交确认，修完后对应回归从约 `6.5s` 降到 `2.0s`。
+- rollback_condition: 如果未来真实页再次要求“必须看到 retail header 才能安全填写”且 row cells 可见并不代表 ready，不要直接删掉这条 ready signal；先补真实页 canary 或更具体的 header/grid 双信号，再决定是否恢复滚动链。
+
+## 2026-03-16 / Maintenance / Duplicate-Intent Audit Should Stay A Soft Audit Asset Before CI Gate
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/duplicate-intent-audit.test.ts`
+- relation: enriches
+- failure_signature: 仓库已经有“共享 helper 不得在 `modules.ts` 本地重定义”的结构门，但没有一个更上游的视图去找“名字不同、意图相同”的函数家族。结果是每次想继续收缩 `modules.ts` 都只能靠体感搜代码，很容易漏掉正在平行生长的 helper，等到双真相已经形成才被结构测试打脸。
+- working_selector_or_action: 在正式合并 helper 之前，先跑 `npm run audit:duplicate-intent`。这条审计器只扫描 `src/**/*.ts`，提取函数 catalog，用轻量 token 归一化输出 duplicate-intent markdown 候选组，给人做结构收缩前的证据视图。当前阶段它必须保持 soft audit，不接 CI，不自动判死刑。
+- rollback_condition: 如果未来真实维护中连续多轮证明这份审计报告噪音低、且能稳定命中后续被人工确认的重复 helper，再考虑把其中一小部分规则升级成硬门；在那之前不要把“候选组”误升成阻断条件。
