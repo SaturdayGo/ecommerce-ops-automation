@@ -488,6 +488,164 @@ test('fillSKUs does not keep repeated 220ms retail-header waits when row cells a
   }
 });
 
+test('fillSKUs does not keep variant-selection fixed waits when combobox feedback is immediate', async () => {
+  const browser: Browser = await chromium.launch({ headless: true });
+  const page: Page = await browser.newPage();
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  await page.setContent(`
+<!doctype html>
+<html>
+  <body>
+    <section id="sku-panel" style="display:block; margin-top: 16px;">
+      <div class="posting-feild-color-item" data-row="0">
+        <div class="ait-select" tabindex="0">
+          <span class="ait-select-selection-item">选择主色系</span>
+          <input class="color-combo" role="combobox" aria-label="光线颜色" />
+        </div>
+        <input class="sku-name" placeholder="自定义名称" />
+      </div>
+
+      <table>
+        <tbody>
+          <tr data-grid-row="0">
+            <td class="sell-sku-cell col-skuPrice"><div contenteditable="true" class="editor" data-field="price-0"></div></td>
+            <td class="sell-sku-cell col-cargoPrice"><div contenteditable="true" class="editor" data-field="declared-0"></div></td>
+            <td class="sell-sku-cell col-skuStock"><div contenteditable="true" class="editor" data-field="stock-0"></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <script>
+      const combo = document.querySelector('.color-combo');
+      combo.dataset.index = '0';
+      combo.addEventListener('click', () => {
+        document.body.dataset.comboClicked = '1';
+      });
+      combo.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          combo.closest('.posting-feild-color-item').querySelector('.ait-select-selection-item').textContent = '蓝色';
+          document.body.dataset.colorCommitted = '1';
+          event.preventDefault();
+        }
+      });
+    </script>
+  </body>
+</html>
+  `);
+
+  const waitCalls: number[] = [];
+  const originalWaitForTimeout = page.waitForTimeout.bind(page);
+  (page as Page & { waitForTimeout: (timeout: number) => Promise<void> }).waitForTimeout = async (timeout: number) => {
+    waitCalls.push(timeout);
+    return undefined;
+  };
+
+  const data = makeProductData();
+  data.skus = [data.skus[0]];
+
+  try {
+    await fillSKUs(page, data);
+  } finally {
+    (page as Page & { waitForTimeout: typeof originalWaitForTimeout }).waitForTimeout = originalWaitForTimeout;
+  }
+
+  try {
+    const snapshot = await page.evaluate(() => ({
+      colorCommitted: document.body.dataset.colorCommitted || '',
+      price0: document.querySelector('[data-field="price-0"]')?.textContent?.trim() || '',
+      declared0: document.querySelector('[data-field="declared-0"]')?.textContent?.trim() || '',
+      stock0: document.querySelector('[data-field="stock-0"]')?.textContent?.trim() || '',
+    }));
+
+    assert.equal(snapshot.colorCommitted, '1');
+    assert.equal(snapshot.price0, '1299');
+    assert.equal(snapshot.declared0, '999');
+    assert.equal(snapshot.stock0, '20');
+    assert.equal(waitCalls.filter((timeout) => timeout === 140).length, 0, `unexpected 140ms waits: ${waitCalls.join(', ')}`);
+    assert.equal(waitCalls.filter((timeout) => timeout === 200).length, 0, `unexpected 200ms waits: ${waitCalls.join(', ')}`);
+    assert.ok(waitCalls.filter((timeout) => timeout === 180).length <= 1, `unexpected 180ms waits: ${waitCalls.join(', ')}`);
+  } finally {
+    await page.close();
+    await browser.close();
+  }
+});
+
+test('fillSKUs does not keep repeated 120ms editor-entry waits when inline editors are already present', async () => {
+  const browser: Browser = await chromium.launch({ headless: true });
+  const page: Page = await browser.newPage();
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  await page.setContent(`
+<!doctype html>
+<html>
+  <body>
+    <section id="sku-panel" style="display:block; margin-top: 16px;">
+      <div class="posting-feild-color-item" data-row="0">
+        <div class="ait-select" tabindex="0">
+          <span class="ait-select-selection-item">选择主色系</span>
+          <input class="color-combo" role="combobox" aria-label="光线颜色" />
+        </div>
+        <input class="sku-name" placeholder="自定义名称" />
+      </div>
+
+      <table>
+        <tbody>
+          <tr data-grid-row="0">
+            <td class="sell-sku-cell col-skuPrice"><div contenteditable="true" class="editor" data-field="price-0"></div></td>
+            <td class="sell-sku-cell col-cargoPrice"><div contenteditable="true" class="editor" data-field="declared-0"></div></td>
+            <td class="sell-sku-cell col-skuStock"><div contenteditable="true" class="editor" data-field="stock-0"></div></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <script>
+      const combo = document.querySelector('.color-combo');
+      combo.dataset.index = '0';
+      combo.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          combo.closest('.posting-feild-color-item').querySelector('.ait-select-selection-item').textContent = '蓝色';
+          event.preventDefault();
+        }
+      });
+    </script>
+  </body>
+</html>
+  `);
+
+  const waitCalls: number[] = [];
+  const originalWaitForTimeout = page.waitForTimeout.bind(page);
+  (page as Page & { waitForTimeout: (timeout: number) => Promise<void> }).waitForTimeout = async (timeout: number) => {
+    waitCalls.push(timeout);
+    return undefined;
+  };
+
+  const data = makeProductData();
+  data.skus = [data.skus[0]];
+
+  try {
+    await fillSKUs(page, data);
+  } finally {
+    (page as Page & { waitForTimeout: typeof originalWaitForTimeout }).waitForTimeout = originalWaitForTimeout;
+  }
+
+  try {
+    const snapshot = await page.evaluate(() => ({
+      price0: document.querySelector('[data-field="price-0"]')?.textContent?.trim() || '',
+      declared0: document.querySelector('[data-field="declared-0"]')?.textContent?.trim() || '',
+      stock0: document.querySelector('[data-field="stock-0"]')?.textContent?.trim() || '',
+    }));
+
+    assert.equal(snapshot.price0, '1299');
+    assert.equal(snapshot.declared0, '999');
+    assert.equal(snapshot.stock0, '20');
+    assert.equal(waitCalls.filter((timeout) => timeout === 120).length, 0, `unexpected 120ms waits: ${waitCalls.join(', ')}`);
+  } finally {
+    await page.close();
+    await browser.close();
+  }
+});
+
 test('fillSKUs reports sub-phase progress in execution order', async () => {
   const browser: Browser = await chromium.launch({ headless: true });
   const page: Page = await browser.newPage();

@@ -547,3 +547,17 @@
 - failure_signature: 仓库已经有“共享 helper 不得在 `modules.ts` 本地重定义”的结构门，但没有一个更上游的视图去找“名字不同、意图相同”的函数家族。结果是每次想继续收缩 `modules.ts` 都只能靠体感搜代码，很容易漏掉正在平行生长的 helper，等到双真相已经形成才被结构测试打脸。
 - working_selector_or_action: 在正式合并 helper 之前，先跑 `npm run audit:duplicate-intent`。这条审计器只扫描 `src/**/*.ts`，提取函数 catalog，用轻量 token 归一化输出 duplicate-intent markdown 候选组，给人做结构收缩前的证据视图。当前阶段它必须保持 soft audit，不接 CI，不自动判死刑。
 - rollback_condition: 如果未来真实维护中连续多轮证明这份审计报告噪音低、且能稳定命中后续被人工确认的重复 helper，再考虑把其中一小部分规则升级成硬门；在那之前不要把“候选组”误升成阻断条件。
+
+## 2026-03-17 / Stable Chain / Module 5 Variant Selection Should Wait On Selection Commit, Not 140-200-180 Blind Sleeps
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module5-ui-flow.test.ts`
+- relation: enriches
+- failure_signature: 在单 SKU fixture 里，下拉和选中态都会立即反馈，但 `selectUniqueLightColorForRow()` 仍固定支付 `140ms + 200ms + 180ms`，`resetSkuTabAnchor()` 在根本没有 SKU tab 或滚动变化时也会额外支付 `140ms`。结果是颜色选择早已成功，测试仍被一串无意义的固定等待拖慢。
+- working_selector_or_action: `resetSkuTabAnchor()` 只在真的点过 SKU tab 或滚动位置发生变化时才付 `140ms` 稳定等待；`selectUniqueLightColorForRow()` 打开下拉后直接检查 combobox 可见，提交后用 `MutationObserver` 等待 `.ait-select-selection-item / .color-value` 从“选择主色系”切到真实值，不再依赖 `140/200/180ms` 盲等。修完后新回归从约 `3.3s` 降到约 `2.6s`。
+- rollback_condition: 如果未来真实页证明颜色下拉提交存在异步动画且 `MutationObserver` 提前返回，不能直接把盲等加回来；先补一个真实页 canary，把“下拉可见”“选中值变化”“焦点迁移”拆成更具体信号，再决定是否恢复最小等待。
+
+## 2026-03-17 / Stable Chain / Module 5 Inline Editor Entry Should Probe Existing Editor Before Paying 120ms
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/tests/module5-ui-flow.test.ts`
+- relation: enriches
+- failure_signature: 单 SKU 场景里，价格/货值/库存 cell 的 `contenteditable` editor 一开始就已经在 DOM 中，但 `fillSkuCellValue()` 在每次 `dblclick()` 后仍固定支付 `120ms`。结果是三个 cell 明明可立即写值，测试还会白白多出 `120ms x3`。
+- working_selector_or_action: `fillSkuCellValue()` 在进入编辑态后，先立即探测 `input:visible / textarea:visible / [contenteditable=true]`；只有当 inline editor 既不可见也未附着时，才做最多 `120ms` 的 `Promise.any(waitFor visible/attached)`。现成 editor 直接写值，不再支付固定等待。修完后对应回归从约 `3.1s` 降到约 `2.1s`。
+- rollback_condition: 如果未来真实页证明某类 SKU cell 必须在双击后经过异步 mount 才能安全写值，不要恢复无条件 `120ms`；先补真实页 canary，把“editor attached”“editor visible”“focus landed”区分成具体信号，再决定是否保留最小等待。

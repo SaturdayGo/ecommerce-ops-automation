@@ -1606,7 +1606,8 @@ async function resetSkuTabAnchor(page: Page): Promise<void> {
         .locator('text=SKU价格与库存')
         .or(page.locator('text=SKU Price & Inventory'))
         .first();
-    if (await skuTab.isVisible({ timeout: 1200 }).catch(() => false)) {
+    const tabVisible = await skuTab.isVisible({ timeout: 1200 }).catch(() => false);
+    if (tabVisible) {
         await safeClick(skuTab, 1400);
         await Promise.any([
             page.locator('.posting-feild-color-item .ait-select').first().waitFor({ state: 'visible', timeout: 220 }),
@@ -1628,7 +1629,9 @@ async function resetSkuTabAnchor(page: Page): Promise<void> {
     if (!resetDone) {
         await page.evaluate(() => window.scrollTo(0, 0)).catch(() => { });
     }
-    await page.waitForTimeout(140);
+    if (tabVisible || resetDone) {
+        await page.waitForTimeout(140);
+    }
 }
 
 async function fillNthVisibleInput(locator: Locator, index: number, value: string): Promise<boolean> {
@@ -2997,13 +3000,20 @@ async function fillSkuGridValues(page: Page, data: ProductData, hooks?: Module5P
         await cell.dblclick().catch(async () => {
             await cell.click().catch(() => { });
         });
-        await page.waitForTimeout(120);
 
         // 方案 A: 单元格内出现输入框
         const inlineInput = cell.locator('input:visible, textarea:visible, [contenteditable="true"]:visible').first();
         const inlineEditor = cell.locator('[contenteditable="true"], input, textarea').first();
-        const inlineEditorReady = await inlineInput.isVisible({ timeout: 300 }).catch(() => false)
+        let inlineEditorReady = await inlineInput.isVisible({ timeout: 180 }).catch(() => false)
             || (await inlineEditor.count().catch(() => 0)) > 0;
+        if (!inlineEditorReady) {
+            await Promise.any([
+                inlineInput.waitFor({ state: 'visible', timeout: 120 }),
+                inlineEditor.waitFor({ state: 'attached', timeout: 120 }),
+            ]).catch(() => { });
+            inlineEditorReady = await inlineInput.isVisible({ timeout: 120 }).catch(() => false)
+                || (await inlineEditor.count().catch(() => 0)) > 0;
+        }
         const editorTarget = await inlineInput.isVisible({ timeout: 120 }).catch(() => false)
             ? inlineInput
             : inlineEditor;
@@ -3237,6 +3247,12 @@ async function selectUniqueLightColorForRow(
 ): Promise<string | null> {
     const colorSelect = row.locator('.ait-select').first();
     const comboInput = row.locator('input[role="combobox"]').first();
+    const readSelectedText = async (): Promise<string> =>
+        (((await row.locator('.ait-select-selection-item').first().textContent().catch(() => ''))
+            || (await row.locator('.color-value').first().textContent().catch(() => ''))
+            || '')
+            .replace(/\s+/g, ' ')
+            .trim());
     if (!await colorSelect.isVisible({ timeout: 1200 }).catch(() => false)) {
         console.log('      ↪️  主色系下拉控件不可见');
         return null;
@@ -3244,7 +3260,6 @@ async function selectUniqueLightColorForRow(
 
     // 稳定策略：打开下拉后用键盘按“从上到下”的顺序选项
     await colorSelect.click().catch(() => { });
-    await page.waitForTimeout(140);
 
     if (!await comboInput.isVisible({ timeout: 1200 }).catch(() => false)) {
         console.log('      ↪️  主色系 combobox 不可见');
@@ -3252,21 +3267,44 @@ async function selectUniqueLightColorForRow(
     }
 
     await comboInput.click().catch(() => { });
-    await page.waitForTimeout(200);
 
     const targetIndex = rowIndex;
     for (let i = 0; i < targetIndex; i++) {
         await comboInput.press('ArrowDown').catch(() => { });
-        await page.waitForTimeout(100);
     }
     await comboInput.press('Enter').catch(() => { });
-    await page.waitForTimeout(180);
+    await row.evaluate((rowEl) => {
+        const readSelected = () => {
+            const selection = rowEl.querySelector('.ait-select-selection-item, .color-value');
+            return (selection?.textContent || '').replace(/\s+/g, ' ').trim();
+        };
 
-    const selectedText = ((await row.locator('.ait-select-selection-item').first().textContent().catch(() => ''))
-        || (await row.locator('.color-value').first().textContent().catch(() => ''))
-        || '')
-        .replace(/\s+/g, ' ')
-        .trim();
+        if (readSelected() && readSelected() !== '选择主色系') {
+            return Promise.resolve(true);
+        }
+
+        return new Promise<boolean>((resolve) => {
+            const deadline = window.setTimeout(() => {
+                observer.disconnect();
+                resolve(false);
+            }, 240);
+            const observer = new MutationObserver(() => {
+                const selectedText = readSelected();
+                if (selectedText && selectedText !== '选择主色系') {
+                    window.clearTimeout(deadline);
+                    observer.disconnect();
+                    resolve(true);
+                }
+            });
+            observer.observe(rowEl, {
+                subtree: true,
+                childList: true,
+                characterData: true,
+            });
+        });
+    }).catch(() => false);
+
+    const selectedText = await readSelectedText();
 
     if (selectedText && selectedText !== '选择主色系') {
         usedColors.add(selectedText);
