@@ -147,6 +147,28 @@
 - 让下一轮 `modules.ts` 收缩先看证据，再决定合并对象
 - 借用 `finding-duplicate-functions` 的思路，但不把实验性插件 runtime 引进主仓
 
+### 3.5 Knowledge Routing + Governance Sink
+
+**文件:**
+- [`docs/automation/decision-log.md`](/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/docs/automation/decision-log.md)
+- [`docs/automation/lessons.md`](/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/docs/automation/lessons.md)
+- [`docs/plans/`](/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/docs/plans)
+- [`runtime/state.json`](/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/runtime/state.json)
+
+**能力:**
+- 把“单次运行真相 / 可复跑经验 / 阶段计划 / 长期治理决策”分到不同 sink
+- 避免 `lessons.md` 退化成杂乱会议纪要
+- 让下个 agent 更快定位“这条结论该从哪读”
+
+**价值:**
+- 对 evidence-driven automation 项目复用价值很高
+- 对半自动、manual-gate、multi-agent 协作仓库尤其值钱
+- 本质上是在给长期记忆层加路由，不依赖 AliExpress 页面本身
+
+**适用边界:**
+- 适合：有 runtime truth、failure ledger、phase plan 三层以上知识分层的仓库
+- 不适合：一次性脚本、小型 demo、没有长期维护需求的单文件项目
+
 ## 4. Candidate Reusable Hooks / Skills
 
 下面这些已经足够成熟，可以继续固化成独立 hook/skill：
@@ -158,6 +180,7 @@
 5. `Runtime Evidence Hook`
 6. `Manual Handoff Summary Hook`
 7. `Duplicate-Intent Audit`
+8. `Knowledge Routing + Decision Log`
 
 ## 5. 明确不应复用的东西
 

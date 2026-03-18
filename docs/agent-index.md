@@ -77,9 +77,10 @@ Read in this order:
 3. `docs/aliexpress-automation-technical-implementation.md`
 4. `docs/aliexpress-automation-implementation-reference.md`
 5. `docs/automation/lessons.md`
-6. `docs/supervisor/README.md`
-7. `src/main.ts`
-8. `src/modules.ts`
+6. `docs/automation/decision-log.md`
+7. `docs/supervisor/README.md`
+8. `src/main.ts`
+9. `src/modules.ts`
 
 ## Canonical Global Context Files
 
@@ -158,6 +159,7 @@ Look here when diagnosing execution:
 - `runtime/state.json` for current execution state
 - `runtime/intervention.json` for supervisor decisions
 - `docs/automation/lessons.md` for reusable failure and recovery knowledge
+- `docs/automation/decision-log.md` for long-lived governance decisions and knowledge routing
 
 ## Source-Of-Truth Files
 
@@ -171,6 +173,7 @@ Use these files as the primary source of truth:
 | Implementation reference | `docs/aliexpress-automation-implementation-reference.md` |
 | Supervisor model | `docs/supervisor/README.md` |
 | Recovery lessons | `docs/automation/lessons.md` |
+| Governance decisions | `docs/automation/decision-log.md` |
 | Gstack role policy | `docs/plans/2026-03-18-gstack-adoption-policy.md` |
 | Runtime control flow | `src/main.ts` |
 | Module implementations | `src/modules.ts` |
@@ -216,3 +219,4 @@ Manual-first or isolated:
 
 Do not assume dual browser control is allowed.
 Do not assume gstack introduces a second browser runtime for this repo; role wrappers must respect the single evidence chain.
+Do not treat `lessons.md` as a catch-all sink; runtime truth, phase plans, and governance decisions must stay separated.

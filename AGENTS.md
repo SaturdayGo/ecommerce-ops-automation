@@ -16,6 +16,7 @@ Read these files first:
 
 - `docs/agent-index.md`
 - `docs/plans/2026-03-18-gstack-adoption-policy.md`
+- `docs/automation/decision-log.md`
 - `.gemini/GEMINI.md`
 - `docs/supervisor/gemini-supervisor-agent-template.md`
 - `docs/supervisor/state-intervention-schema.md`
@@ -55,3 +56,4 @@ Runtime supervision uses:
 - Do not escalate on cosmetic UI jitter.
 - Only recommend stopping on logical risk, policy violation, repeated failure, or false success.
 - If gstack team roles are used, obey `docs/plans/2026-03-18-gstack-adoption-policy.md` for priority, routing, and restricted-role rules.
+- Use `docs/automation/decision-log.md` for long-lived governance decisions; do not overload `docs/automation/lessons.md` with phase-only planning or one-off run truth.

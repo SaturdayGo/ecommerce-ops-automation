@@ -32,6 +32,7 @@ If you are a full-text LLM agent or a new maintainer, use this read order:
 4. `docs/aliexpress-automation-technical-implementation.md`
 5. `docs/aliexpress-automation-implementation-reference.md`
 6. `docs/automation/lessons.md`
+7. `docs/automation/decision-log.md`
 
 ## 当前定位
 
@@ -92,6 +93,7 @@ Canonical identity:
 | Implementation reference | `docs/aliexpress-automation-implementation-reference.md` |
 | Supervisor documentation | `docs/supervisor/README.md` |
 | Recovery and failure knowledge | `docs/automation/lessons.md` |
+| Governance decisions and knowledge routing | `docs/automation/decision-log.md` |
 | Prioritized hardening roadmap | `docs/plans/2026-03-14-prioritized-hardening-roadmap.md` |
 | Reusable automation assets | `docs/automation/reusable-assets.md` |
 
@@ -115,6 +117,7 @@ flowchart LR
     F["Gemini Supervisor"] --> E
     F --> G["runtime/intervention.json"]
     D --> H["docs/automation/lessons.md"]
+    D --> I["docs/automation/decision-log.md"]
 ```
 
 ## 项目结构
@@ -136,6 +139,7 @@ automation/
 ├── tests/
 ├── docs/
 │   ├── automation/lessons.md
+│   ├── automation/decision-log.md
 │   ├── supervisor/
 │   ├── aliexpress-automation-implementation-reference.md
 │   └── aliexpress-automation-technical-implementation.md
@@ -285,6 +289,7 @@ HUD 和 `events.json` 已接入录屏链路，用于解释“页面为什么停�
 2. 单模块前台可视测试
 3. 连续稳定通过后再纳入集成链路
 4. 每个模块稳定后，把经验写入 `docs/automation/lessons.md`
+5. 长期执行边界、知识分流和治理修正写入 `docs/automation/decision-log.md`
 5. 只在真正需要时，才引入 Gemini + CDP 做页面诊断
 
 ## 进一步阅读
@@ -292,6 +297,7 @@ HUD 和 `events.json` 已接入录屏链路，用于解释“页面为什么停�
 - `docs/aliexpress-automation-implementation-reference.md`
 - `docs/aliexpress-automation-technical-implementation.md`
 - `docs/automation/lessons.md`
+- `docs/automation/decision-log.md`
 - `AliExpress_Automation_Post_Mortem.md`
 
 ## 仓库说明
