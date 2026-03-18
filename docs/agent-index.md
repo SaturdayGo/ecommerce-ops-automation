@@ -171,6 +171,7 @@ Use these files as the primary source of truth:
 | Implementation reference | `docs/aliexpress-automation-implementation-reference.md` |
 | Supervisor model | `docs/supervisor/README.md` |
 | Recovery lessons | `docs/automation/lessons.md` |
+| Gstack role policy | `docs/plans/2026-03-18-gstack-adoption-policy.md` |
 | Runtime control flow | `src/main.ts` |
 | Module implementations | `src/modules.ts` |
 
@@ -214,3 +215,4 @@ Manual-first or isolated:
   - `runtime/intervention.json`
 
 Do not assume dual browser control is allowed.
+Do not assume gstack introduces a second browser runtime for this repo; role wrappers must respect the single evidence chain.

@@ -15,6 +15,7 @@ It must not click, type, navigate, close the browser, or edit source code while 
 Read these files first:
 
 - `docs/agent-index.md`
+- `docs/plans/2026-03-18-gstack-adoption-policy.md`
 - `.gemini/GEMINI.md`
 - `docs/supervisor/gemini-supervisor-agent-template.md`
 - `docs/supervisor/state-intervention-schema.md`
@@ -50,5 +51,7 @@ Runtime supervision uses:
 ## Hard Boundaries
 
 - Do not introduce browser co-control.
+- Do not introduce a second browser/runtime stack through gstack.
 - Do not escalate on cosmetic UI jitter.
 - Only recommend stopping on logical risk, policy violation, repeated failure, or false success.
+- If gstack team roles are used, obey `docs/plans/2026-03-18-gstack-adoption-policy.md` for priority, routing, and restricted-role rules.
