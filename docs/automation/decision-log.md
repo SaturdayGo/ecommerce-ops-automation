@@ -64,3 +64,11 @@
 - rationale: 近期对话里的治理修正已经持续写进 plan / AGENTS / policy，但没有统一长期账本，外部观感会误读成“没有主动蒸馏”。
 - impact: 以后每次 substantial 对话结束，都应先做知识分流：runtime truth -> `runtime/*`，运行经验 -> `lessons.md`，治理修正 -> `decision-log.md`，阶段策略 -> `docs/plans/*`。
 - review_trigger: 如果后续发现 `decision-log.md` 开始混入一次性 run 细节或失去检索价值，应拆出更细的 governance / architecture 子账本，而不是继续堆积。
+
+## 2026-03-19 / Skills / Default Review Stack Should Be Retro -> Eng Review -> Browse -> Review -> Docs -> Ship Gate
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/docs/plans/2026-03-19-skills-aware-project-retro.md`
+- relation: enriches
+- decision: 后续对整仓做深度回顾、评估新 slice、或判断是否重开 hardening 时，默认 skill 栈使用 `codex-retro -> codex-plan-eng-review -> codex-browse -> codex-review -> codex-document-release -> codex-ship-gate`，而不是直接进入 `codex-qa`。
+- rationale: 当前项目的主要风险已从模块实现转向治理质量、证据 freshness、和角色串台；先做 retro 和 engineering review，能避免把“是否该继续做”误判成“先修再说”。
+- impact: `codex-qa` 保持安全区限定；`codex-team-orchestrator` 只在任务归属不清时启用；真实 seller 主线默认先做 canary / evidence capture，不跑 full test-fix loop。
+- review_trigger: 如果项目未来重新进入 broad implementation phase，或真实主线出现需要立即修复的 blocking regression，才重新评估是否让 `codex-qa` 进入默认路径。
