@@ -72,3 +72,11 @@
 - rationale: 当前项目的主要风险已从模块实现转向治理质量、证据 freshness、和角色串台；先做 retro 和 engineering review，能避免把“是否该继续做”误判成“先修再说”。
 - impact: `codex-qa` 保持安全区限定；`codex-team-orchestrator` 只在任务归属不清时启用；真实 seller 主线默认先做 canary / evidence capture，不跑 full test-fix loop。
 - review_trigger: 如果项目未来重新进入 broad implementation phase，或真实主线出现需要立即修复的 blocking regression，才重新评估是否让 `codex-qa` 进入默认路径。
+
+## 2026-03-23 / External Skills / Web-Access Stays Outside Main Runtime
+- source: `2026-03-23 technical comparison against https://github.com/eze-is/web-access`
+- relation: enriches
+- decision: `web-access` 可作为项目外围研究和网页登录探索工具使用，但不进入 AliExpress 发品主线 runtime，也不替换当前 `Playwright + runtime evidence` 单栈。
+- rationale: 它在搜索、网页抓取、登录态动态页、CDP 直连日常 Chrome、多站点并行探索上更强；但主线发品自动化需要的是单一浏览器栈、单一证据链、per-run truth、manual gate 与 handoff 一致，而不是更灵活的多通道浏览代理。
+- impact: 允许在 repo 外围调研、平台规则查看、非主线网页登录探索中参考 `web-access` 的通道调度思路；不允许把它接进主仓的 runtime truth、handoff、或主线 canary 流程。
+- review_trigger: 如果未来项目主动放弃“单一浏览器栈 + 单一证据链”原则，或决定把仓库重构为通用联网代理框架，才重新评估是否引入 `web-access`。
