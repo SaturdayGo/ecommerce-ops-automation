@@ -80,3 +80,11 @@
 - rationale: 它在搜索、网页抓取、登录态动态页、CDP 直连日常 Chrome、多站点并行探索上更强；但主线发品自动化需要的是单一浏览器栈、单一证据链、per-run truth、manual gate 与 handoff 一致，而不是更灵活的多通道浏览代理。
 - impact: 允许在 repo 外围调研、平台规则查看、非主线网页登录探索中参考 `web-access` 的通道调度思路；不允许把它接进主仓的 runtime truth、handoff、或主线 canary 流程。
 - review_trigger: 如果未来项目主动放弃“单一浏览器栈 + 单一证据链”原则，或决定把仓库重构为通用联网代理框架，才重新评估是否引入 `web-access`。
+
+## 2026-03-24 / External Runtime / Browser Use 2.0 Is Trialed Only As A Sidecar Pilot
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/docs/plans/2026-03-24-browser-use-2-pilot.md`
+- relation: enriches
+- decision: `Browser Use CLI 2.0` 目前只允许作为旁路试点使用，试点范围限定在 `auth/session recovery` 与真实页探索；不允许直接替换 AliExpress 发品主线，也不允许生成正式 runtime truth。
+- rationale: 当前主线刚完成 `publish_ready` gate 硬化并重新跑通真实半自动 canary。此时直接迁移浏览器执行栈会把“试新工具”和“改主线 truth source”混成一个动作，爆炸半径过大。
+- impact: 后续若试用 Browser Use，只能做 auth-only A/B 对比，比较 `login -> publish ready` 的成功率、失败形状、与证据完整度；正式 `runtime/state.json`、handoff、manual gate 仍由现有 `Playwright + runtime evidence` 主线负责。
+- review_trigger: 只有当旁路试点连续证明 Browser Use 在 auth/session 恢复上更稳、失败更早暴露、且不需要第二套 truth source 时，才允许讨论是否给它更大角色。

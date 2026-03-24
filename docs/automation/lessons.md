@@ -561,3 +561,10 @@
 - failure_signature: 单 SKU 场景里，价格/货值/库存 cell 的 `contenteditable` editor 一开始就已经在 DOM 中，但 `fillSkuCellValue()` 在每次 `dblclick()` 后仍固定支付 `120ms`。结果是三个 cell 明明可立即写值，测试还会白白多出 `120ms x3`。
 - working_selector_or_action: `fillSkuCellValue()` 在进入编辑态后，先立即探测 `input:visible / textarea:visible / [contenteditable=true]`；只有当 inline editor 既不可见也未附着时，才做最多 `120ms` 的 `Promise.any(waitFor visible/attached)`。现成 editor 直接写值，不再支付固定等待。修完后对应回归从约 `3.1s` 降到约 `2.1s`。
 - rollback_condition: 如果未来真实页证明某类 SKU cell 必须在双击后经过异步 mount 才能安全写值，不要恢复无条件 `120ms`；先补真实页 canary，把“editor attached”“editor visible”“focus landed”区分成具体信号，再决定是否保留最小等待。
+
+## 2026-03-23 / Runtime Gate / Publish Ready Must Fail Closed On Login Redirect Or Empty CSP Shell
+- source: `/Users/aiden/Documents/Antigravity/ecommerce-ops/automation/runlogs/run-20260323100713-797acf_modules-1a-1b-1c-1d-2-3-4-5-6a-6b-6c-7-8.log`
+- relation: enriches
+- failure_signature: fresh 半自动 canary 里，浏览器先落到登录页，`navigateToPublishPage()` 既会在 fallback/reload 后把空壳页误放行为 `publish`，也会因为 login URL 的 `return_url=https://csp.aliexpress.com/...` 子串把 `login.aliexpress.com` 误认成卖家后台。结果是 runtime 先通过 `publish_ready`，然后才在 `1b` 的“未找到标题输入框”处迟到失败。
+- working_selector_or_action: `navigateToPublishPage()` 必须 fail closed，而且 publish host 判断要看 `hostname`，不是整串 `includes('csp.aliexpress.com')`。当前有效契约是：只有真实 `csp.aliexpress.com` host 才进入 publish-shell 检测；fallback 或 reload 后只要检测到 seller login URL / password form，就返回 `login`；如果仍在 `csp` 域下但始终没有发布表单，就直接抛 `发布页未就绪`，禁止把空壳页伪装成 `publish`。对应回归必须同时锁住“fallback 跳登录页 -> login”“login host + csp return_url -> immediate login”“空壳页无表单 -> reject”。
+- rollback_condition: 如果未来 AliExpress 新前端再次改成分阶段注入表单，不要恢复“壳页没 ready 也先 return publish 让上层试”的宽松语义；先补新的 ready marker 或真实页证据，再决定是否放宽 gate。

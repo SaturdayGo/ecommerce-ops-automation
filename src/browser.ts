@@ -222,6 +222,19 @@ function isModernPublishUrl(url: string): boolean {
     return url.includes(MODERN_PUBLISH_PATH_MARKER);
 }
 
+function parseUrl(url: string): URL | null {
+    try {
+        return new URL(url);
+    } catch {
+        return null;
+    }
+}
+
+function isSellerWorkbenchUrl(url: string): boolean {
+    const parsed = parseUrl(url);
+    return parsed?.hostname === 'csp.aliexpress.com';
+}
+
 async function waitForPublishFormReady(page: Page, timeoutMs: number = 25000): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -246,6 +259,19 @@ async function waitForPublishFormReady(page: Page, timeoutMs: number = 25000): P
         await page.waitForTimeout(800);
     }
     return false;
+}
+
+async function detectLoginGate(page: Page): Promise<boolean> {
+    const currentUrl = page.url();
+    if (
+        currentUrl.includes('login.aliexpress.com')
+        || currentUrl.includes('passport.aliexpress.com')
+        || currentUrl.includes('/user/seller/login')
+    ) {
+        return true;
+    }
+
+    return await page.locator('input[type="password"]').isVisible({ timeout: 500 }).catch(() => false);
 }
 
 /**
@@ -277,7 +303,7 @@ export async function navigateToPublishPage(page: Page): Promise<PublishPageStat
         }
 
         // ✅ 已到达卖家后台 (csp.aliexpress.com)
-        if (currentUrl.includes('csp.aliexpress.com')) {
+        if (isSellerWorkbenchUrl(currentUrl)) {
             console.log('   ⏳ 已到达卖家后台，等待发布表单渲染...');
             const ready = await waitForPublishFormReady(page, 20000);
             if (ready && isLegacyPublishUrl(currentUrl)) {
@@ -297,6 +323,10 @@ export async function navigateToPublishPage(page: Page): Promise<PublishPageStat
                 console.log('✅ fallback 发布页已就绪');
                 return 'publish';
             }
+            if (await detectLoginGate(page)) {
+                console.log('🔐 fallback 跳转后检测到登录页');
+                return 'login';
+            }
 
             // 最后兜底：刷新当前页再等一次
             console.log('   ↪️  fallback 仍未就绪，刷新重试一次...');
@@ -306,8 +336,11 @@ export async function navigateToPublishPage(page: Page): Promise<PublishPageStat
                 console.log('✅ 刷新后发布页已就绪');
                 return 'publish';
             }
-            console.log('   ⚠️  页面仍未渲染完整表单，继续由上层模块尝试');
-            return 'publish';
+            if (await detectLoginGate(page)) {
+                console.log('🔐 刷新后检测到登录页');
+                return 'login';
+            }
+            throw new Error(`发布页未就绪：未检测到发布表单，当前 URL = ${page.url()}`);
         }
 
         // 🔐 被重定向到登录页
@@ -335,7 +368,7 @@ export async function navigateToPublishPage(page: Page): Promise<PublishPageStat
         return 'login';
     }
     // 如果 URL 在 aliexpress.com 域下，也当作发布页处理
-    if (finalUrl.includes('aliexpress.com')) {
+    if (isSellerWorkbenchUrl(finalUrl)) {
         console.log('   ⚠️  虽然超时，但仍在 AliExpress 域下，尝试继续...');
         return 'publish';
     }
